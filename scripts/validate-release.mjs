@@ -27,6 +27,8 @@ const requiredFiles = [
   "dist/workflow-studio-widget.html",
   "skills/workflow-studio/SKILL.md",
   "skills/workflow-studio/agents/openai.yaml",
+  "src/workspace-guard.mjs",
+  "workflows/change-workspace.js",
 ];
 await Promise.all(requiredFiles.map(requireFile));
 
@@ -43,7 +45,7 @@ const [manifest, packageJson, marketplace, skill, openaiYaml, widget, readme, re
 ]);
 
 assert.equal(manifest.name, "workflow-studio");
-assert.equal(manifest.version, "0.1.1");
+assert.equal(manifest.version, "0.2.0");
 assert.equal(packageJson.version, manifest.version);
 assert.equal(manifest.repository, repositoryUrl);
 assert.equal(manifest.homepage, repositoryUrl);
@@ -58,7 +60,9 @@ assert.deepEqual(marketplace.plugins[0]?.source, { source: "url", url: repositor
 assert.equal(marketplace.plugins[0]?.policy?.installation, "AVAILABLE");
 assert.equal(marketplace.plugins[0]?.policy?.authentication, "ON_INSTALL");
 
-assert.match(skill, /substantial single-file deliverables/i);
+assert.match(skill, /substantial single-file artifacts or multi-file repository changes/i);
+assert.match(skill, /run_workspace_workflow/);
+assert.match(skill, /Never use `\.` or `\.git`/);
 assert.match(skill, /Do not select Workflow Studio implicitly/);
 assert.match(skill, /Explicit `\$workflow-studio` invocation/);
 assert.match(openaiYaml, /allow_implicit_invocation:\s*true/);
@@ -66,9 +70,12 @@ assert.match(openaiYaml, /default_prompt:\s*"Use \$workflow-studio/);
 
 assert.doesNotMatch(widget, /\/\*__WORKFLOW_STUDIO_(?:STYLES|SCRIPT)__\*\//);
 assert.doesNotMatch(widget, /<(?:script|link|img)[^>]+(?:src|href)=["']https?:/i);
+assert.match(widget, /Open changes/);
+assert.match(widget, /Files verified/);
 assert.match(readme, /codex plugin marketplace add alexanderradahl\/workflow-studio/);
 assert.match(readme, /Reliable selection in crowded Codex profiles/);
 assert.match(readme, /~\/.codex\/AGENTS\.md/);
+assert.match(readme, /substantial single-file artifact or multi-file repository change/);
 assert.match(readme, /does not edit global Codex instructions during installation/);
 assert.match(releasing, /Choose a license/);
 assert.match(gitignore, /dist\/\*\.md/);

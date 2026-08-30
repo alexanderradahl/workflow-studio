@@ -2,6 +2,7 @@
 set -euo pipefail
 
 original_home="${HOME:?HOME is required}"
+original_path="${PATH:-}"
 real_codex="${CODEX_REAL_BIN:-$(command -v codex)}"
 original_codex_home="${CODEX_HOME:-$original_home/.codex}"
 lean_base="${ULTRACODE_LEAN_USER_HOME:-$original_home/.codex/ultracode/lean-user-home}"
@@ -55,46 +56,230 @@ if [[ "${1:-}" == "exec" ]]; then
 
   if [[ -n "$guard_workspace_root" ]]; then
     workspace_root="${ULTRACODE_WORKSPACE_ROOT:-}"
+    workspace_root="${workspace_root:A}"
     allowed_output="${ULTRACODE_ALLOWED_OUTPUT:-}"
+    allowed_write_paths_json="${ULTRACODE_ALLOWED_WRITE_PATHS_JSON:-}"
     if [[ "$workspace_write" != true && "$read_only" != true ]]; then
       print -u2 "codex-lean: guarded workflow workers must request read-only or workspace-write"
       exit 2
     fi
-    if [[ "$workspace_write" == true && -z "$allowed_output" ]]; then
-      print -u2 "codex-lean: workspace-write requires the build-artifact output guard"
+    if [[ "$workspace_write" == true && -z "$allowed_output" && -z "$allowed_write_paths_json" ]]; then
+      print -u2 "codex-lean: workspace-write requires a host-generated write guard"
+      exit 2
+    fi
+    if [[ "$workspace_write" == true && -n "$allowed_output" && -n "$allowed_write_paths_json" ]]; then
+      print -u2 "codex-lean: workspace-write received conflicting write guards"
       exit 2
     fi
     typeset -a guarded_args
     guarded_args=()
-    skip_next=false
-    for argument in "$@"; do
-      if [[ "$skip_next" == true ]]; then
-        skip_next=false
-        continue
-      fi
+    typeset -a input_args
+    input_args=("$@")
+    for (( index = 1; index <= ${#input_args}; index++ )); do
+      argument="${input_args[$index]}"
       if [[ "$argument" == "--sandbox" || "$argument" == "-s" ]]; then
-        skip_next=true
+        (( index++ ))
+        continue
       elif [[ "$argument" == --sandbox=* || "$argument" == -s=* ]]; then
         continue
+      elif [[ "$argument" == "-c" || "$argument" == "--config" ]]; then
+        (( index++ ))
+        config_value="${input_args[$index]:-}"
+        if [[ "$config_value" == 'approval_policy="never"' ]]; then
+          continue
+        elif [[ "$config_value" =~ '^model_reasoning_effort="(none|minimal|low|medium|high|xhigh|max|ultra)"$' ]]; then
+          guarded_args+=("-c" "$config_value")
+          continue
+        fi
+        print -u2 "codex-lean: guarded workers reject caller-supplied Codex configuration"
+        exit 2
+      elif [[ "$argument" == -c=* || "$argument" == --config=* ]]; then
+        config_value="${argument#*=}"
+        if [[ "$config_value" == 'approval_policy="never"' ]]; then
+          continue
+        elif [[ "$config_value" =~ '^model_reasoning_effort="(none|minimal|low|medium|high|xhigh|max|ultra)"$' ]]; then
+          guarded_args+=("-c" "$config_value")
+          continue
+        fi
+        print -u2 "codex-lean: guarded workers reject caller-supplied Codex configuration"
+        exit 2
+      elif [[ "$argument" == -c?* ]]; then
+        print -u2 "codex-lean: guarded workers reject caller-supplied Codex configuration"
+        exit 2
+      elif [[ "$argument" == "--ignore-user-config" || "$argument" == "--ignore-rules" ]]; then
+        continue
+      elif [[ "$argument" == "--cd" || "$argument" == "-C" ]]; then
+        (( index++ ))
+        requested_cwd="${input_args[$index]:-}"
+        if [[ -z "$requested_cwd" || "${requested_cwd:A}" != "$workspace_root" ]]; then
+          print -u2 "codex-lean: guarded workers must run at the guarded workspace root"
+          exit 2
+        fi
+        guarded_args+=("--cd" "$workspace_root")
+        continue
+      elif [[ "$argument" == --cd=* || "$argument" == -C=* ]]; then
+        requested_cwd="${argument#*=}"
+        if [[ -z "$requested_cwd" || "${requested_cwd:A}" != "$workspace_root" ]]; then
+          print -u2 "codex-lean: guarded workers must run at the guarded workspace root"
+          exit 2
+        fi
+        guarded_args+=("--cd" "$workspace_root")
+        continue
+      elif [[ "$argument" == -C?* ]]; then
+        print -u2 "codex-lean: guarded workers reject attached working-directory overrides"
+        exit 2
+      elif [[ "$argument" == "--profile" || "$argument" == "-p" || "$argument" == "--add-dir" || "$argument" == "--local-provider" ]]; then
+        print -u2 "codex-lean: guarded workers reject profile, add-dir, and provider overrides"
+        exit 2
+      elif [[ "$argument" == --profile=* || "$argument" == -p=* || "$argument" == --add-dir=* || "$argument" == --local-provider=* ]]; then
+        print -u2 "codex-lean: guarded workers reject profile, add-dir, and provider overrides"
+        exit 2
+      elif [[ "$argument" == -p?* ]]; then
+        print -u2 "codex-lean: guarded workers reject profile, add-dir, and provider overrides"
+        exit 2
+      elif [[ "$argument" == -s?* ]]; then
+        print -u2 "codex-lean: guarded workers reject attached sandbox overrides"
+        exit 2
+      elif [[ "$argument" == "--search" || "$argument" == --search=* || "$argument" == "--oss" ||
+              "$argument" == "--approve-for-me" || "$argument" == "--dangerously-bypass-approvals-and-sandbox" ||
+              "$argument" == "--dangerously-bypass-hook-trust" || "$argument" == "--enable" ||
+              "$argument" == --enable=* || "$argument" == "--disable" || "$argument" == --disable=* ]]; then
+        print -u2 "codex-lean: guarded workers reject search, bypass, and feature overrides"
+        exit 2
       else
         guarded_args+=("$argument")
       fi
     done
 
-    toml_root="${workspace_root//\\/\\\\}"
-    toml_root="${toml_root//\"/\\\"}"
     if [[ "$workspace_write" == true ]]; then
-      toml_output="${allowed_output//\\/\\\\}"
-      toml_output="${toml_output//\"/\\\"}"
-      permissions_override="permissions={ artifact_guard={ description=\"Exact local artifact writer\", filesystem={ \":minimal\"=\"read\", \":tmpdir\"=\"write\", \"$toml_root\"=\"read\", \"$toml_output\"=\"write\" }, network={ enabled=false } } }"
+      if [[ -n "$allowed_output" ]]; then
+        write_targets_json="$(node -e 'process.stdout.write(JSON.stringify([process.argv[1]]))' "$allowed_output")"
+      else
+        write_targets_json="$allowed_write_paths_json"
+      fi
     else
-      permissions_override="permissions={ artifact_guard={ description=\"Local artifact read-only worker\", filesystem={ \":minimal\"=\"read\", \":tmpdir\"=\"write\", \"$toml_root\"=\"read\" }, network={ enabled=false } } }"
+      write_targets_json='[]'
     fi
+    permissions_override="$(node -e '
+        try {
+          const fs = require("fs");
+          const path = require("path");
+          const root = fs.realpathSync(process.argv[1]);
+          const targets = JSON.parse(process.argv[2]);
+          const originalHome = fs.realpathSync(process.argv[3]);
+          if (!Array.isArray(targets) || targets.length > 32) {
+            throw new Error("write targets must contain at most 32 paths");
+          }
+          const inside = (candidate) => {
+            const relative = path.relative(root, candidate);
+            return relative && relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+          };
+          const validated = [];
+          for (const [index, raw] of targets.entries()) {
+            if (typeof raw !== "string" || !path.isAbsolute(raw)) throw new Error(`write target ${index + 1} must be absolute`);
+            const lexicalTarget = path.resolve(raw);
+            let target;
+            try {
+              target = fs.realpathSync(lexicalTarget);
+            } catch (error) {
+              if (error.code !== "ENOENT") throw error;
+              let parent;
+              try {
+                parent = fs.realpathSync(path.dirname(lexicalTarget));
+              } catch (parentError) {
+                if (parentError.code === "ENOENT") throw new Error(`write target ${index + 1} has a missing parent`);
+                throw parentError;
+              }
+              target = path.join(parent, path.basename(lexicalTarget));
+            }
+            if (!inside(target)) throw new Error(`write target ${index + 1} must be inside the guarded workspace and not its root`);
+            const relative = path.relative(root, target);
+            const parts = relative.split(path.sep);
+            if (parts.includes(".git")) throw new Error(`write target ${index + 1} must not include .git metadata`);
+            let current = root;
+            for (let partIndex = 0; partIndex < parts.length; partIndex += 1) {
+              current = path.join(current, parts[partIndex]);
+              let stats;
+              try {
+                stats = fs.lstatSync(current);
+              } catch (error) {
+                if (error.code !== "ENOENT") throw error;
+                if (partIndex < parts.length - 1) throw new Error(`write target ${index + 1} has a missing parent`);
+                break;
+              }
+              if (stats.isSymbolicLink()) throw new Error(`write target ${index + 1} contains a symbolic link`);
+              if (partIndex < parts.length - 1 && !stats.isDirectory()) {
+                throw new Error(`write target ${index + 1} has a non-directory parent`);
+              }
+              if (partIndex === parts.length - 1 && !stats.isDirectory() && !stats.isFile()) {
+                throw new Error(`write target ${index + 1} is not a regular file or directory`);
+              }
+              if (partIndex === parts.length - 1 && stats.isFile() && stats.nlink !== 1) {
+                throw new Error(`write target ${index + 1} is hard-linked`);
+              }
+            }
+            if (validated.includes(target)) throw new Error("write targets must be unique");
+            validated.push(target);
+          }
+          const entries = [
+            [":minimal", "read"],
+            [":tmpdir", "write"],
+            ...[
+              "/System/Library/OpenSSL",
+              "/Library/Developer/CommandLineTools",
+              "/opt/homebrew",
+              "/usr/local",
+              path.join(originalHome, ".nvm", "versions"),
+              path.join(originalHome, ".local", "bin"),
+              path.join(originalHome, ".cache", "codex-runtimes", "codex-primary-runtime", "dependencies"),
+            ]
+              .filter((candidate) => fs.existsSync(candidate))
+              .map((candidate) => [fs.realpathSync(candidate), "read"]),
+            [root, "read"],
+            ...validated.map((target) => [target, "write"]),
+          ];
+          const filesystem = entries.map(([target, access]) => `${JSON.stringify(target)}=${JSON.stringify(access)}`).join(", ");
+          process.stdout.write(`permissions={ artifact_guard={ description="Scoped local workflow worker", filesystem={ ${filesystem} }, network={ enabled=false } } }`);
+        } catch (error) {
+          process.stderr.write(`codex-lean: ${error.message}\n`);
+          process.exit(2);
+        }
+      ' "$workspace_root" "$write_targets_json" "$original_home")" || {
+      print -u2 "codex-lean: could not validate the host-generated write guard"
+      exit 2
+    }
+
+    typeset -a rule_args
+    rule_args=()
+    if [[ "${ULTRACODE_RESPECT_WORKSPACE_RULES:-0}" != "1" ]]; then
+      rule_args+=("--ignore-rules")
+    fi
+
+    typeset -a guarded_path_entries
+    guarded_path_entries=()
+    for candidate in ${(s/:/)original_path}; do
+      [[ -n "$candidate" && -d "$candidate" ]] || continue
+      candidate="${candidate:A}"
+      if [[ "$candidate" == "/opt/homebrew" || "$candidate" == "/opt/homebrew"/* ||
+            "$candidate" == "/usr/local" || "$candidate" == "/usr/local"/* ||
+            "$candidate" == "$original_home/.nvm/versions" || "$candidate" == "$original_home/.nvm/versions"/* ||
+            "$candidate" == "$original_home/.local/bin" ||
+            "$candidate" == "$original_home/.cache/codex-runtimes/codex-primary-runtime/dependencies" ||
+            "$candidate" == "$original_home/.cache/codex-runtimes/codex-primary-runtime/dependencies"/* ]]; then
+        guarded_path_entries+=("$candidate")
+      fi
+    done
+    for candidate in /opt/homebrew/bin /usr/local/bin /usr/bin /bin /usr/sbin /sbin; do
+      [[ -d "$candidate" ]] && guarded_path_entries+=("$candidate")
+    done
+    typeset -U guarded_path_entries
+    export PATH="${(j/:/)guarded_path_entries}"
 
     command_status=0
     "$real_codex" exec \
       --ignore-user-config \
-      --ignore-rules \
+      "${rule_args[@]}" \
+      -c 'approval_policy="never"' \
       -c 'default_permissions="artifact_guard"' \
       -c 'web_search="disabled"' \
       -c "$permissions_override" \

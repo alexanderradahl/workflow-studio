@@ -37,7 +37,7 @@ try {
   const initialized = await request(1, "initialize", { protocolVersion: "2025-06-18" });
   assert.equal(initialized.result.serverInfo.name, "workflow-studio");
   const tools = await request(2, "tools/list");
-  assert.equal(tools.result.tools.length, 3);
+  assert.equal(tools.result.tools.length, 4);
   const resources = await request(3, "resources/list");
   assert.equal(resources.result.resources.length, 1);
   console.log("Workflow Studio MCP stdio smoke passed");

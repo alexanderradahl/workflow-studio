@@ -1,6 +1,6 @@
 # Contributing
 
-Workflow Studio intentionally owns one workflow: creating and independently verifying one substantial local artifact. Keep contributions within that boundary.
+Workflow Studio intentionally owns two fixed workflows: creating and independently verifying one substantial local artifact, and implementing a bounded multi-file change in a Git repository. Keep contributions within those boundaries.
 
 ## Development setup
 
@@ -19,8 +19,8 @@ python3 ~/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py .
 ## Change expectations
 
 - Preserve fixed-schema MCP tools; do not add arbitrary command or script execution.
-- Preserve exact-path output guards and network-disabled workers.
-- Keep implicit invocation selective. Simple edits, read-only work, multi-file coding, and external actions are not Workflow Studio tasks.
+- Preserve exact-file and bounded multi-path guards, repository-instruction loading, host-observed change evidence, and network-disabled workers.
+- Keep implicit invocation selective. Simple edits, read-only work, command-only tasks, external actions, and latency-sensitive work are not Workflow Studio tasks.
 - Add or update tests for behavior-changing edits.
 - Keep generated build output (`dist/workflow-studio-widget.html`) current.
 - Do not commit `node_modules`, local run journals, or smoke artifacts.

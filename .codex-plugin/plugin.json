@@ -1,7 +1,7 @@
 {
   "name": "workflow-studio",
-  "version": "0.1.1",
-  "description": "Create and independently verify one substantial local artifact through a guarded visual multi-agent workflow.",
+  "version": "0.2.0",
+  "description": "Create and independently verify substantial single-file artifacts or bounded multi-file repository changes through guarded visual workflows.",
   "author": {
     "name": "Alexander Benz",
     "url": "https://github.com/alexanderradahl"
@@ -12,6 +12,7 @@
     "workflow",
     "multi-agent",
     "artifact",
+    "repository",
     "dashboard",
     "ultracode"
   ],
@@ -20,7 +21,7 @@
   "interface": {
     "displayName": "Workflow Studio",
     "shortDescription": "Run and visualize guarded Codex workflows",
-    "longDescription": "Workflow Studio is for substantial single-file deliverables that materially benefit from separate framing, planning, building, review, repair, and final verification. Invoke it explicitly with $workflow-studio or let Codex select it when that boundary is met. Simple edits, read-only analysis, multi-file implementation, command-only work, and external actions remain on their ordinary Codex paths. Every run uses fixed least-privilege controls and returns an inline dashboard with phases, findings, output, timing, and usage.",
+    "longDescription": "Workflow Studio runs two fixed guarded workflows: one for a substantial single-file artifact and one for a bounded multi-file change in an existing Git repository. Invoke it explicitly with $workflow-studio or let Codex select it when substantial local write work benefits from separate discovery, planning, implementation, review, repair, and final verification. Simple edits, read-only analysis, command-only work, external actions, and latency-sensitive tasks remain on their ordinary Codex paths. Every run returns an inline dashboard with phases, findings, file-level evidence, timing, and usage.",
     "developerName": "Alexander Benz",
     "category": "Productivity",
     "capabilities": [
@@ -29,6 +30,7 @@
       "Write"
     ],
     "defaultPrompt": [
+      "Use $workflow-studio for a bounded multi-file repository feature",
       "Use $workflow-studio for a substantial single-file brief",
       "Show my latest Workflow Studio run",
       "Explain when Workflow Studio is the right choice"

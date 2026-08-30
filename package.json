@@ -1,9 +1,9 @@
 {
   "name": "workflow-studio-codex-plugin",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "A guarded visual multi-agent artifact workflow for Codex.",
+  "description": "Guarded visual multi-agent artifact and repository workflows for Codex.",
   "homepage": "https://github.com/alexanderradahl/workflow-studio",
   "repository": {
     "type": "git",

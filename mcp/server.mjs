@@ -5,9 +5,11 @@ import { fileURLToPath } from "node:url";
 import {
   DEFAULT_PHASES,
   PLUGIN_ROOT,
+  WORKSPACE_PHASES,
   getLatestWorkflowRun,
   getWorkflowRun,
   runBuildArtifact,
+  runWorkspaceWorkflow,
 } from "../src/runtime.mjs";
 
 const serverDir = path.dirname(fileURLToPath(import.meta.url));
@@ -17,7 +19,7 @@ export const SERVER_VERSION = manifest.version || "0.1.0";
 export const WIDGET_URI = `ui://widget/workflow-studio-${encodeURIComponent(SERVER_VERSION)}.html`;
 export const WIDGET_MIME_TYPE = "text/html;profile=mcp-app";
 const WIDGET_PATH = path.resolve(serverDir, "..", "dist", "workflow-studio-widget.html");
-const WIDGET_DESCRIPTION = "An inline Workflow Studio dashboard showing guarded workflow status, ordered phases, output, findings, duration, and token usage.";
+const WIDGET_DESCRIPTION = "An inline Workflow Studio dashboard showing guarded workflow phases, authorized scopes, planned and changed files, verification, findings, duration, and token usage.";
 const ICON_SVG = readFileSync(path.join(PLUGIN_ROOT, "assets", "workflow-studio-small.svg"), "utf8");
 const ICON = {
   src: `data:image/svg+xml;base64,${Buffer.from(ICON_SVG).toString("base64")}`,
@@ -76,6 +78,52 @@ const runSchema = {
   },
 };
 
+const workspaceRunSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["task", "workspace", "write_paths"],
+  properties: {
+    task: {
+      type: "string",
+      minLength: 1,
+      maxLength: 20000,
+      description: "Concrete brief for the substantial multi-file repository change Workflow Studio should implement and verify.",
+    },
+    workspace: {
+      type: "string",
+      minLength: 1,
+      maxLength: 4096,
+      description: "Absolute path to the canonical root of an existing local Git worktree with a valid HEAD.",
+    },
+    write_paths: {
+      type: "array",
+      minItems: 1,
+      maxItems: 32,
+      items: { type: "string", minLength: 1, maxLength: 1024 },
+      description: "One through 32 normalized relative file or directory scopes. The workspace root, .git, traversal, and links are rejected.",
+    },
+    constraints: {
+      type: "array",
+      maxItems: 20,
+      items: { type: "string", minLength: 1, maxLength: 2000 },
+      description: "Optional exact scope, compatibility, safety, and validation constraints.",
+    },
+    source_context: {
+      type: "string",
+      minLength: 1,
+      maxLength: 50000,
+      description: "Optional bounded source context supplied directly to the workflow workers.",
+    },
+    scouts: {
+      type: "integer",
+      minimum: 2,
+      maximum: 4,
+      default: 2,
+      description: "Number of independent read-only discovery lanes, from 2 through 4.",
+    },
+  },
+};
+
 function toolUiMeta(name, invoking, invoked) {
   return {
     ui: { resourceUri: WIDGET_URI, visibility: ["model"] },
@@ -93,7 +141,7 @@ export function toolDefinitions() {
     {
       name: "run_build_artifact",
       title: "Run guarded artifact workflow",
-      description: "Create and verify one substantial single local artifact through Workflow Studio's fixed six-phase multi-agent workflow. Use only after an explicit create/write request when independent framing and review materially improve the result. Do not use for simple edits, read-only analysis, multi-file implementation, command-only work, or external actions. This operation can write only the requested output file and does not permit worker command networking.",
+      description: "Create and verify one substantial local artifact through Workflow Studio's exact-file multi-agent workflow. Use after an explicit one-file create/write request when independent framing and review materially improve the result. Use run_workspace_workflow for substantial multi-file repository changes. This operation can write only the requested output file and does not permit worker command networking.",
       inputSchema: runSchema,
       annotations: {
         readOnlyHint: false,
@@ -102,6 +150,19 @@ export function toolDefinitions() {
         openWorldHint: false,
       },
       _meta: toolUiMeta("run_build_artifact", "Running guarded workflow", "Guarded workflow finished"),
+    },
+    {
+      name: "run_workspace_workflow",
+      title: "Run guarded workspace workflow",
+      description: "Implement and verify one substantial multi-file change in a local Git repository through Workflow Studio's fixed discovery, plan, implementation, review, repair, and verification workflow. Use only after an explicit implementation request and after establishing bounded write_paths. Repository instructions are respected, writes are limited to those scopes, worker networking is disabled, and host-observed changes outside scope block acceptance. Do not use for trivial edits, read-only analysis, command-only work, status checks, or external actions.",
+      inputSchema: workspaceRunSchema,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
+      _meta: toolUiMeta("run_workspace_workflow", "Running workspace workflow", "Workspace workflow finished"),
     },
     {
       name: "show_workflow_dashboard",
@@ -174,10 +235,11 @@ function isPlainObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function failedState(message) {
+function failedState(message, toolName) {
+  const workspaceWorkflow = toolName === "run_workspace_workflow";
   return {
-    schemaVersion: 1,
-    workflow: "build-artifact",
+    schemaVersion: 2,
+    workflow: workspaceWorkflow ? "change-workspace" : "build-artifact",
     state: "failed",
     status: "error",
     accepted: false,
@@ -187,6 +249,10 @@ function failedState(message) {
     workspace: null,
     outputPath: null,
     absoluteOutputPath: null,
+    writePaths: [],
+    changedPaths: [],
+    files: [],
+    fileCounts: { planned: 0, changed: 0, verified: 0 },
     sourceHash: null,
     startedAt: null,
     completedAt: null,
@@ -202,25 +268,36 @@ function failedState(message) {
       reasoningTokens: 0,
       totalTokens: 0,
     },
-    phases: DEFAULT_PHASES.map((phase) => ({ ...phase, status: "pending", workerCount: 0 })),
+    phases: (workspaceWorkflow ? WORKSPACE_PHASES : DEFAULT_PHASES).map((phase) => ({
+      ...phase,
+      status: "pending",
+      workerCount: 0,
+    })),
   };
 }
 
-function textSummary(state) {
+function textSummary(state, { toolName } = {}) {
   const lines = [
     `Workflow Studio: ${state.title}.`,
     state.summary,
   ];
   if (state.runId) lines.push(`Run: ${state.runId}`);
   if (state.outputPath) lines.push(`Output: ${state.outputPath}`);
+  if (Array.isArray(state.writePaths) && state.writePaths.length) lines.push(`Write scopes: ${state.writePaths.join(", ")}`);
+  if (state.fileCounts?.changed) {
+    lines.push(`Files: ${state.fileCounts.changed} changed, ${state.fileCounts.verified || 0} verified`);
+  }
   if (state.durationMs != null) lines.push(`Duration: ${state.durationMs} ms`);
   lines.push(`Accepted: ${state.accepted === true ? "yes" : state.accepted === false ? "no" : "not run"}`);
+  if (["run_build_artifact", "run_workspace_workflow"].includes(toolName) && state.accepted === false) {
+    lines.push("Retry: wait for a new visible user request before starting another writable Workflow Studio run.");
+  }
   return lines.join("\n");
 }
 
 function toolResult(state, { isError = false, toolName } = {}) {
   return {
-    content: [{ type: "text", text: textSummary(state) }],
+    content: [{ type: "text", text: textSummary(state, { toolName }) }],
     structuredContent: state,
     isError,
     _meta: toolUiMeta(toolName || "workflow_studio", "Loading Workflow Studio", "Workflow Studio ready"),
@@ -241,7 +318,13 @@ async function callTool(name, args) {
     const pending = runQueue.then(() => runBuildArtifact(args));
     runQueue = pending.catch(() => undefined);
     const state = await pending;
-    return toolResult(state, { isError: false, toolName: name });
+    return toolResult(state, { isError: !state.accepted, toolName: name });
+  }
+  if (name === "run_workspace_workflow") {
+    const pending = runQueue.then(() => runWorkspaceWorkflow(args));
+    runQueue = pending.catch(() => undefined);
+    const state = await pending;
+    return toolResult(state, { isError: !state.accepted, toolName: name });
   }
   throw new Error(`Unknown Workflow Studio tool: ${name}`);
 }
@@ -274,10 +357,10 @@ export async function handleRpc(message) {
           name: SERVER_NAME,
           title: "Workflow Studio",
           version: SERVER_VERSION,
-          description: "Run and visualize a guarded local multi-agent artifact workflow.",
+          description: "Run and visualize guarded single-file artifact or multi-file repository workflows.",
           icons: [ICON],
         },
-        instructions: "Use run_build_artifact only after an explicit create/write request for one substantial local artifact whose quality materially benefits from independent framing, planning, review, repair, and verification. Do not use it for simple edits, read-only analysis, multi-file implementation, command-only work, or external actions. Require a concrete task, absolute existing workspace, and normalized relative output path. Use show_workflow_dashboard or get_workflow_run for read-only inspection. Success requires accepted=true in the returned structured content.",
+        instructions: "Use run_build_artifact after an explicit request for one substantial local artifact and an exact normalized output path. Use run_workspace_workflow after an explicit substantial multi-file repository implementation request, an absolute canonical Git root, and 1-32 bounded relative write_paths. Do not use either writable tool for trivial edits, read-only analysis, command-only work, status checks, or external actions. Use show_workflow_dashboard or get_workflow_run for read-only inspection. Success requires accepted=true in the returned structured content; a failed workspace run may still report observed changed files that require review.",
       });
     }
     if (method === "ping") return rpcResponse(id, {});
@@ -289,7 +372,7 @@ export async function handleRpc(message) {
       try {
         return rpcResponse(id, await callTool(params.name, args));
       } catch (error) {
-        const state = failedState(error?.message || String(error));
+        const state = failedState(error?.message || String(error), params.name);
         return rpcResponse(id, toolResult(state, { isError: true, toolName: params.name }));
       }
     }

@@ -2,7 +2,7 @@
   "mcpServers": {
     "workflowStudio": {
       "title": "Workflow Studio",
-      "description": "Run and visualize the guarded local build-artifact workflow.",
+      "description": "Run and visualize guarded single-file artifact and bounded multi-file repository workflows.",
       "icons": [
         {
           "src": "./assets/workflow-studio-small.svg",

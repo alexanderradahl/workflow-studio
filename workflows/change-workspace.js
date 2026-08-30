@@ -35,9 +35,14 @@ const ALLOWED_ARGUMENTS = new Set([
 ]);
 const CONFIDENCE_VALUES = new Set(["low", "medium", "high"]);
 
-const commonReportProperties = {
+const findingArrayProperty = {
+  type: "array",
+  maxItems: MAX_FINDINGS,
+  items: { type: "string", minLength: 1, maxLength: MAX_FINDING_LENGTH },
+};
+
+const baseReportProperties = {
   summary: { type: "string", minLength: 1, maxLength: 8_000 },
-  findings: { type: "array", maxItems: MAX_FINDINGS, items: { type: "string", minLength: 1, maxLength: MAX_FINDING_LENGTH } },
   recommended_actions: {
     type: "array",
     maxItems: MAX_FINDINGS,
@@ -51,6 +56,9 @@ const commonReportProperties = {
   },
   confidence: { type: "string", enum: ["low", "medium", "high"] },
 };
+
+const commonReportProperties = { ...baseReportProperties, findings: findingArrayProperty };
+const executionReportProperties = { ...baseReportProperties, blocking_findings: findingArrayProperty };
 
 const DISCOVERY_SCHEMA = {
   type: "object",
@@ -94,9 +102,9 @@ const PLANNER_SCHEMA = {
 const IMPLEMENTATION_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["summary", "changed_paths", "findings", "recommended_actions", "risks", "verification", "confidence"],
+  required: ["summary", "changed_paths", "blocking_findings", "recommended_actions", "risks", "verification", "confidence"],
   properties: {
-    ...commonReportProperties,
+    ...executionReportProperties,
     changed_paths: { type: "array", minItems: 1, maxItems: MAX_RESULT_PATHS, items: { type: "string", minLength: 1, maxLength: MAX_RESULT_PATH_LENGTH } },
   },
 };
@@ -104,9 +112,9 @@ const IMPLEMENTATION_SCHEMA = {
 const REPAIR_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["summary", "changed_paths", "findings", "recommended_actions", "risks", "verification", "confidence"],
+  required: ["summary", "changed_paths", "blocking_findings", "recommended_actions", "risks", "verification", "confidence"],
   properties: {
-    ...commonReportProperties,
+    ...executionReportProperties,
     changed_paths: { type: "array", maxItems: MAX_RESULT_PATHS, items: { type: "string", minLength: 1, maxLength: MAX_RESULT_PATH_LENGTH } },
   },
 };
@@ -114,9 +122,9 @@ const REPAIR_SCHEMA = {
 const VERIFIER_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["summary", "verified_paths", "findings", "recommended_actions", "risks", "verification", "confidence"],
+  required: ["summary", "verified_paths", "blocking_findings", "recommended_actions", "risks", "verification", "confidence"],
   properties: {
-    ...commonReportProperties,
+    ...executionReportProperties,
     verified_paths: { type: "array", maxItems: MAX_RESULT_PATHS, items: { type: "string", minLength: 1, maxLength: MAX_RESULT_PATH_LENGTH } },
   },
 };
@@ -224,16 +232,16 @@ function validateReport(
   label,
   writePaths,
   pathKey,
-  { requirePaths = true, requireVerification = true, extraKeys = [] } = {},
+  { requirePaths = true, requireVerification = true, extraKeys = [], findingKey = "findings" } = {},
 ) {
   if (!isPlainObject(value)) throw new Error(`${label} did not return a structured object.`);
-  const allowedKeys = new Set(["summary", "findings", "recommended_actions", "risks", "verification", "confidence"]);
+  const allowedKeys = new Set(["summary", findingKey, "recommended_actions", "risks", "verification", "confidence"]);
   if (pathKey) allowedKeys.add(pathKey);
   for (const key of extraKeys) allowedKeys.add(key);
   const unsupported = Object.keys(value).filter((key) => !allowedKeys.has(key));
   if (unsupported.length) throw new Error(`${label} returned unsupported field(s): ${unsupported.join(", ")}.`);
   const summary = requireString(value.summary, `${label}.summary`, 8_000);
-  const findings = validateStringArray(value.findings, `${label}.findings`, {
+  const findings = validateStringArray(value[findingKey], `${label}.${findingKey}`, {
     maxItems: MAX_FINDINGS,
     maxItemLength: MAX_FINDING_LENGTH,
   });
@@ -258,12 +266,12 @@ function validateReport(
     : [];
   const report = {
     summary,
-    findings,
     recommended_actions: recommendedActions,
     risks,
     verification,
     confidence: value.confidence,
   };
+  report[findingKey] = findings;
   if (pathKey) report[pathKey] = paths;
   for (const key of extraKeys) report[key] = value[key];
   return report;
@@ -295,7 +303,7 @@ function samePathSet(left, right) {
 
 const workflowArgs = typeof args === "undefined" ? undefined : args;
 const request = validateArguments(workflowArgs);
-const workspace = process.cwd();
+const workspace = "the current workspace";
 const codexBin = "codex-lean";
 const constraintText = request.constraints.length
   ? request.constraints.map((constraint, index) => `${index + 1}. ${constraint}`).join("\n")
@@ -400,8 +408,8 @@ const implementation = await agent(
     `repository files. Preserve all applicable repository instructions. Do not commit or push. Do not send, publish, ` +
     `deploy, browse, or use network access. Read local source and tests as needed. Run focused checks that directly ` +
     `support the brief, and report every file actually added, modified, deleted, or mode-changed in changed_paths. ` +
-    `Return JSON matching the supplied schema; findings must contain any actual write or required-validation failure, ` +
-    `and verification must contain direct evidence.\n\n` +
+    `Return JSON matching the supplied schema. Put ordinary change details in summary and verification. ` +
+    `blocking_findings must be empty unless a write or required validation actually failed.\n\n` +
     `Task: ${request.task}\nWorkspace: ${workspace}\nConstraints:\n${constraintText}\nSource context:\n${request.source_context}\n` +
     `Pre-existing repository status (do not count these paths as your change unless you modify them):\n${baselineStatusText}\n` +
     `${repositoryRules}\n${externalBoundary}\n\nApproved plan:\n${JSON.stringify(plan, null, 2)}`,
@@ -414,8 +422,11 @@ const implementation = await agent(
     schema: IMPLEMENTATION_SCHEMA,
   },
 );
-const implementationReport = validateReport(implementation, "implementer", request.write_paths, "changed_paths", { requirePaths: true });
-if (implementationReport.findings.length > 0 || implementationReport.verification.length === 0) {
+const implementationReport = validateReport(implementation, "implementer", request.write_paths, "changed_paths", {
+  requirePaths: true,
+  findingKey: "blocking_findings",
+});
+if (implementationReport.blocking_findings.length > 0 || implementationReport.verification.length === 0) {
   throw new Error("The implementation worker returned blocking findings or incomplete verification evidence.");
 }
 
@@ -471,7 +482,7 @@ phase("Repair");
 let repairReport = {
   summary: "No repair pass was needed because both reviewers returned no actionable findings.",
   changed_paths: [],
-  findings: [],
+  blocking_findings: [],
   recommended_actions: [],
   risks: [],
   verification: ["Both read-only reviewers returned empty findings; no repair worker was started."],
@@ -483,7 +494,8 @@ if (reviewFindings.length > 0) {
       `repository rules. Apply only corrections supported by the brief or observable files, and write only inside ` +
       `authorized write_paths:\n${writePathText}\nDo not expand scope. Do not commit, push, send, publish, deploy, browse, ` +
       `or use network access. Re-run focused checks, report every path you changed in changed_paths, and put any actual ` +
-      `write or required-validation failure in findings. Return JSON matching the supplied schema.\n\n` +
+      `actual write or required-validation failure in blocking_findings. Put ordinary correction details in summary ` +
+      `and verification. Return JSON matching the supplied schema.\n\n` +
       `Task: ${request.task}\nWorkspace: ${workspace}\nConstraints:\n${constraintText}\nSource context:\n${request.source_context}\n` +
       `${repositoryRules}\n${externalBoundary}\n\nPlan:\n${JSON.stringify(plan, null, 2)}\n` +
       `Implementation report:\n${JSON.stringify(implementationReport, null, 2)}\n\nReview findings:\n` +
@@ -497,8 +509,11 @@ if (reviewFindings.length > 0) {
       schema: REPAIR_SCHEMA,
     },
   );
-  repairReport = validateReport(repair, "repairer", request.write_paths, "changed_paths", { requirePaths: false });
-  if (repairReport.findings.length > 0 || repairReport.verification.length === 0) {
+  repairReport = validateReport(repair, "repairer", request.write_paths, "changed_paths", {
+    requirePaths: false,
+    findingKey: "blocking_findings",
+  });
+  if (repairReport.blocking_findings.length > 0 || repairReport.verification.length === 0) {
     throw new Error("The repair worker returned blocking findings or incomplete verification evidence.");
   }
 }
@@ -511,8 +526,9 @@ const verification = await agent(
   `Perform a final read-only acceptance check of the real shared workspace change. Inspect every path in the observed ` +
     `workflow change set below, confirm each remains inside authorized write_paths, and run direct focused checks for ` +
     `the requested outcome. Return verified_paths containing exactly every changed path listed below, with no extras or ` +
-    `omissions. Put any blocking issue in findings; otherwise return an empty findings array and concrete evidence in ` +
-    `verification. Do not edit files. Do not commit, push, send, publish, deploy, browse, or use network access.\n\n` +
+    `omissions. Put any blocking issue in blocking_findings; otherwise return an empty blocking_findings array and ` +
+    `concrete evidence in verification. Do not edit files. Do not commit, push, send, publish, deploy, browse, or use ` +
+    `network access.\n\n` +
     `Task: ${request.task}\nWorkspace: ${workspace}\nAuthorized write_paths:\n${writePathText}\nConstraints:\n${constraintText}\n` +
     `Source context:\n${request.source_context}\n${repositoryRules}\n${externalBoundary}\n\n` +
     `Planned paths:\n${JSON.stringify(plan.planned_paths)}\nChanged paths to verify:\n${JSON.stringify(changedPaths)}\n` +
@@ -527,9 +543,12 @@ const verification = await agent(
     schema: VERIFIER_SCHEMA,
   },
 );
-const finalVerification = validateReport(verification, "final-verifier", request.write_paths, "verified_paths", { requirePaths: true });
-if (finalVerification.findings.length > 0) {
-  throw new Error(`Final verification blocked acceptance: ${finalVerification.findings.join(" | ")}`);
+const finalVerification = validateReport(verification, "final-verifier", request.write_paths, "verified_paths", {
+  requirePaths: true,
+  findingKey: "blocking_findings",
+});
+if (finalVerification.blocking_findings.length > 0) {
+  throw new Error(`Final verification blocked acceptance: ${finalVerification.blocking_findings.join(" | ")}`);
 }
 if (!samePathSet(finalVerification.verified_paths, changedPaths)) {
   throw new Error("Final verification did not cover exactly every changed path reported by the writable workers.");

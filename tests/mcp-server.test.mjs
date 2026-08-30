@@ -8,16 +8,20 @@ import {
   toolDefinitions,
 } from "../mcp/server.mjs";
 
-test("MCP server exposes three fixed tools and one inline app resource", () => {
+test("MCP server exposes four fixed tools and one inline app resource", () => {
   const tools = toolDefinitions();
   assert.deepEqual(tools.map((tool) => tool.name), [
     "run_build_artifact",
+    "run_workspace_workflow",
     "show_workflow_dashboard",
     "get_workflow_run",
   ]);
   assert.equal(tools[0].inputSchema.additionalProperties, false);
   assert.equal(tools[0].annotations.openWorldHint, false);
   assert.equal(tools[0]._meta["ui/resourceUri"], WIDGET_URI);
+  assert.equal(tools[1].inputSchema.required.includes("write_paths"), true);
+  assert.equal(tools[1].inputSchema.additionalProperties, false);
+  assert.equal(tools[1].annotations.openWorldHint, false);
   assert.equal(resources()[0].mimeType, WIDGET_MIME_TYPE);
 });
 
@@ -32,7 +36,7 @@ test("initialize, tools/list, resources/list, and resources/read follow MCP cont
   assert.equal(initialized.result.capabilities.tools.listChanged, false);
 
   const listedTools = await handleRpc({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
-  assert.equal(listedTools.result.tools.length, 3);
+  assert.equal(listedTools.result.tools.length, 4);
 
   const listedResources = await handleRpc({ jsonrpc: "2.0", id: 3, method: "resources/list", params: {} });
   assert.equal(listedResources.result.resources[0].uri, WIDGET_URI);
@@ -61,8 +65,29 @@ test("dashboard tool returns a structured ready or trusted-run fallback", async 
   });
   assert.equal(response.result.isError, false);
   assert.equal(response.result._meta["ui/resourceUri"], WIDGET_URI);
-  assert.equal(response.result.structuredContent.schemaVersion, 1);
+  assert.equal(response.result.structuredContent.schemaVersion, 2);
   assert.ok(["ready", "accepted", "failed", "running"].includes(response.result.structuredContent.state));
+});
+
+test("workspace workflow rejects arbitrary execution arguments before launch", async () => {
+  const response = await handleRpc({
+    jsonrpc: "2.0",
+    id: 7,
+    method: "tools/call",
+    params: {
+      name: "run_workspace_workflow",
+      arguments: {
+        task: "Implement a feature",
+        workspace: "/tmp",
+        write_paths: ["src"],
+        workflow_path: "/tmp/unsafe.js",
+      },
+    },
+  });
+  assert.equal(response.result.isError, true);
+  assert.equal(response.result.structuredContent.workflow, "change-workspace");
+  assert.match(response.result.structuredContent.summary, /Unsupported workspace workflow argument/);
+  assert.match(response.result.content[0].text, /new visible user request/);
 });
 
 test("writable tool rejects arbitrary arguments before launching a workflow", async () => {
