@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Workflow Studio">
+  <defs>
+    <linearGradient id="g" x1="3" y1="3" x2="21" y2="21" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#8B7CFF"/>
+      <stop offset="1" stop-color="#4C3DD8"/>
+    </linearGradient>
+  </defs>
+  <rect width="24" height="24" rx="7" fill="url(#g)"/>
+  <path d="M7 7.5h4.25M12.75 7.5H17M7 12h2.25M10.75 12H17M7 16.5h6.25M14.75 16.5H17" fill="none" stroke="white" stroke-width="1.75" stroke-linecap="round"/>
+  <circle cx="12" cy="7.5" r="1.35" fill="white"/>
+  <circle cx="10" cy="12" r="1.35" fill="white"/>
+  <circle cx="14" cy="16.5" r="1.35" fill="white"/>
+</svg>

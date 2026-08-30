@@ -1,0 +1,112 @@
+#!/bin/zsh
+set -euo pipefail
+
+original_home="${HOME:?HOME is required}"
+real_codex="${CODEX_REAL_BIN:-$(command -v codex)}"
+original_codex_home="${CODEX_HOME:-$original_home/.codex}"
+lean_base="${ULTRACODE_LEAN_USER_HOME:-$original_home/.codex/ultracode/lean-user-home}"
+lean_base="${lean_base:A}"
+guard_workspace_root="${ULTRACODE_WORKSPACE_ROOT:-}"
+if [[ -n "$guard_workspace_root" && ( "$lean_base" == "$guard_workspace_root" || "$lean_base" == "$guard_workspace_root"/* ) ]]; then
+  print -u2 "codex-lean: isolated runtime state must live outside the guarded workspace"
+  exit 2
+fi
+lean_home="$lean_base/workers/${PPID}-$$"
+lean_codex_home="$lean_home/.codex"
+
+mkdir -p "$lean_home/.config" "$lean_home/.cache" "$lean_home/.local/share" "$lean_home/tmp" "$lean_codex_home"
+if [[ ! -r "$original_codex_home/auth.json" ]]; then
+  print -u2 "codex-lean: authenticated Codex state was not found at $original_codex_home/auth.json"
+  exit 2
+fi
+/bin/ln -s "$original_codex_home/auth.json" "$lean_codex_home/auth.json"
+
+cleanup_lean_home() {
+  if [[ "$lean_home" == "$lean_base"/workers/* && -d "$lean_home" ]]; then
+    /usr/bin/find "$lean_home" -depth -delete 2>/dev/null || true
+  fi
+}
+trap cleanup_lean_home EXIT
+export HOME="$lean_home"
+export CODEX_HOME="$lean_codex_home"
+export XDG_CONFIG_HOME="$lean_home/.config"
+export XDG_CACHE_HOME="$lean_home/.cache"
+export XDG_DATA_HOME="$lean_home/.local/share"
+export TMPDIR="$lean_home/tmp"
+
+if [[ "${1:-}" == "exec" ]]; then
+  shift
+
+  workspace_write=false
+  read_only=false
+  previous=""
+  for argument in "$@"; do
+    if [[ "$argument" == "--sandbox=workspace-write" || "$argument" == "-s=workspace-write" ]]; then
+      workspace_write=true
+    elif [[ "$argument" == "--sandbox=read-only" || "$argument" == "-s=read-only" ]]; then
+      read_only=true
+    elif [[ ( "$previous" == "--sandbox" || "$previous" == "-s" ) && "$argument" == "workspace-write" ]]; then
+      workspace_write=true
+    elif [[ ( "$previous" == "--sandbox" || "$previous" == "-s" ) && "$argument" == "read-only" ]]; then
+      read_only=true
+    fi
+    previous="$argument"
+  done
+
+  if [[ -n "$guard_workspace_root" ]]; then
+    workspace_root="${ULTRACODE_WORKSPACE_ROOT:-}"
+    allowed_output="${ULTRACODE_ALLOWED_OUTPUT:-}"
+    if [[ "$workspace_write" != true && "$read_only" != true ]]; then
+      print -u2 "codex-lean: guarded workflow workers must request read-only or workspace-write"
+      exit 2
+    fi
+    if [[ "$workspace_write" == true && -z "$allowed_output" ]]; then
+      print -u2 "codex-lean: workspace-write requires the build-artifact output guard"
+      exit 2
+    fi
+    typeset -a guarded_args
+    guarded_args=()
+    skip_next=false
+    for argument in "$@"; do
+      if [[ "$skip_next" == true ]]; then
+        skip_next=false
+        continue
+      fi
+      if [[ "$argument" == "--sandbox" || "$argument" == "-s" ]]; then
+        skip_next=true
+      elif [[ "$argument" == --sandbox=* || "$argument" == -s=* ]]; then
+        continue
+      else
+        guarded_args+=("$argument")
+      fi
+    done
+
+    toml_root="${workspace_root//\\/\\\\}"
+    toml_root="${toml_root//\"/\\\"}"
+    if [[ "$workspace_write" == true ]]; then
+      toml_output="${allowed_output//\\/\\\\}"
+      toml_output="${toml_output//\"/\\\"}"
+      permissions_override="permissions={ artifact_guard={ description=\"Exact local artifact writer\", filesystem={ \":minimal\"=\"read\", \":tmpdir\"=\"write\", \"$toml_root\"=\"read\", \"$toml_output\"=\"write\" }, network={ enabled=false } } }"
+    else
+      permissions_override="permissions={ artifact_guard={ description=\"Local artifact read-only worker\", filesystem={ \":minimal\"=\"read\", \":tmpdir\"=\"write\", \"$toml_root\"=\"read\" }, network={ enabled=false } } }"
+    fi
+
+    command_status=0
+    "$real_codex" exec \
+      --ignore-user-config \
+      --ignore-rules \
+      -c 'default_permissions="artifact_guard"' \
+      -c 'web_search="disabled"' \
+      -c "$permissions_override" \
+      "${guarded_args[@]}" || command_status=$?
+    exit "$command_status"
+  fi
+
+  command_status=0
+  "$real_codex" exec --ignore-user-config "$@" || command_status=$?
+  exit "$command_status"
+fi
+
+command_status=0
+"$real_codex" "$@" || command_status=$?
+exit "$command_status"

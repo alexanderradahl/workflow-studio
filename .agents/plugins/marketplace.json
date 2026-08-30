@@ -1,0 +1,20 @@
+{
+  "name": "workflow-studio",
+  "interface": {
+    "displayName": "Workflow Studio"
+  },
+  "plugins": [
+    {
+      "name": "workflow-studio",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/alexanderradahl/workflow-studio"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

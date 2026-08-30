@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 360" role="img" aria-label="Workflow Studio">
+  <defs>
+    <linearGradient id="bg" x1="48" y1="36" x2="318" y2="326" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#9487FF"/>
+      <stop offset="0.52" stop-color="#6D5EF7"/>
+      <stop offset="1" stop-color="#3B2DBA"/>
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#24178A" flood-opacity="0.28"/>
+    </filter>
+  </defs>
+  <rect x="20" y="20" width="320" height="320" rx="92" fill="url(#bg)"/>
+  <g filter="url(#shadow)" fill="none" stroke="white" stroke-width="20" stroke-linecap="round">
+    <path d="M92 112h72M196 112h72M92 180h34M158 180h110M92 248h106M230 248h38"/>
+  </g>
+  <g fill="white">
+    <circle cx="180" cy="112" r="19"/>
+    <circle cx="142" cy="180" r="19"/>
+    <circle cx="214" cy="248" r="19"/>
+  </g>
+</svg>

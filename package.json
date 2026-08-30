@@ -1,0 +1,31 @@
+{
+  "name": "workflow-studio-codex-plugin",
+  "version": "0.1.1",
+  "private": true,
+  "type": "module",
+  "description": "A guarded visual multi-agent artifact workflow for Codex.",
+  "homepage": "https://github.com/alexanderradahl/workflow-studio",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/alexanderradahl/workflow-studio.git"
+  },
+  "bugs": {
+    "url": "https://github.com/alexanderradahl/workflow-studio/issues"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "npm run build && node --test tests/*.test.mjs",
+    "smoke:mcp": "node tests/mcp-smoke.mjs",
+    "validate:release": "node scripts/validate-release.mjs",
+    "check": "npm test && npm run smoke:mcp && npm run validate:release"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/ext-apps": "^1.7.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.9"
+  }
+}

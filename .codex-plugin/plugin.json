@@ -1,0 +1,44 @@
+{
+  "name": "workflow-studio",
+  "version": "0.1.1",
+  "description": "Create and independently verify one substantial local artifact through a guarded visual multi-agent workflow.",
+  "author": {
+    "name": "Alexander Benz",
+    "url": "https://github.com/alexanderradahl"
+  },
+  "homepage": "https://github.com/alexanderradahl/workflow-studio",
+  "repository": "https://github.com/alexanderradahl/workflow-studio",
+  "keywords": [
+    "workflow",
+    "multi-agent",
+    "artifact",
+    "dashboard",
+    "ultracode"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Workflow Studio",
+    "shortDescription": "Run and visualize guarded Codex workflows",
+    "longDescription": "Workflow Studio is for substantial single-file deliverables that materially benefit from separate framing, planning, building, review, repair, and final verification. Invoke it explicitly with $workflow-studio or let Codex select it when that boundary is met. Simple edits, read-only analysis, multi-file implementation, command-only work, and external actions remain on their ordinary Codex paths. Every run uses fixed least-privilege controls and returns an inline dashboard with phases, findings, output, timing, and usage.",
+    "developerName": "Alexander Benz",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Use $workflow-studio for a substantial single-file brief",
+      "Show my latest Workflow Studio run",
+      "Explain when Workflow Studio is the right choice"
+    ],
+    "brandColor": "#6D5EF7",
+    "composerIcon": "./assets/workflow-studio-small.svg",
+    "logo": "./assets/workflow-studio-logo.svg",
+    "screenshots": [
+      "./assets/workflow-studio-preview.png"
+    ],
+    "websiteURL": "https://github.com/alexanderradahl/workflow-studio"
+  }
+}

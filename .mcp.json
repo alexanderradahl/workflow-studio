@@ -1,0 +1,35 @@
+{
+  "mcpServers": {
+    "workflowStudio": {
+      "title": "Workflow Studio",
+      "description": "Run and visualize the guarded local build-artifact workflow.",
+      "icons": [
+        {
+          "src": "./assets/workflow-studio-small.svg",
+          "mimeType": "image/svg+xml",
+          "sizes": [
+            "24x24"
+          ]
+        },
+        {
+          "src": "./assets/workflow-studio-logo.svg",
+          "mimeType": "image/svg+xml",
+          "sizes": [
+            "360x360"
+          ]
+        }
+      ],
+      "cwd": ".",
+      "command": "node",
+      "args": [
+        "./mcp/server.mjs",
+        "--stdio"
+      ],
+      "env_vars": [
+        "CODEX_HOME",
+        "HOME"
+      ],
+      "tool_timeout_sec": 3600
+    }
+  }
+}

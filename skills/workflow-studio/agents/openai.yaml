@@ -1,0 +1,6 @@
+interface:
+  display_name: "Workflow Studio"
+  short_description: "Build one reviewed artifact with a visual workflow"
+  default_prompt: "Use $workflow-studio to create one substantial local artifact with independent review."
+policy:
+  allow_implicit_invocation: true
