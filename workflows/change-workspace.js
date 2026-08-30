@@ -260,25 +260,25 @@ log(`discovering a bounded workspace change with ${request.scouts} independent s
 
 const discoveryLenses = [
   {
-    label: "requirements-scout",
+    label: "requirements",
     prompt:
       "Translate the implementation request into concrete acceptance criteria. Identify ambiguities and safe assumptions, " +
       "and distinguish required behavior from tempting scope expansion. Inspect relevant local files only; do not edit.",
   },
   {
-    label: "architecture-scout",
+    label: "architecture",
     prompt:
       "Map the existing repository entry points, patterns, dependencies, tests, and likely files involved. Recommend the " +
       "smallest coherent implementation shape. Inspect only; do not edit or run external actions.",
   },
   {
-    label: "risk-scout",
+    label: "risk",
     prompt:
       "Look for concrete correctness, compatibility, safety, permission, and migration risks in the requested change. " +
       "Call out repository instructions and files that must remain untouched. Inspect only; do not edit.",
   },
   {
-    label: "verification-scout",
+    label: "verification",
     prompt:
       "Design focused verification for the requested change: meaningful tests, checks, fixtures, and observable evidence. " +
       "Prefer existing repository commands and direct checks. Inspect only; do not edit.",
@@ -363,7 +363,7 @@ if (implementationReport.findings.length > 0 || implementationReport.verificatio
 phase("Review");
 const reviewLenses = [
   {
-    label: "brief-reviewer",
+    label: "requirements-reviewer",
     prompt:
       "Inspect the real workspace change against the original task, constraints, repository rules, and approved plan. " +
       "Report only actionable gaps or errors in findings; use an empty findings array when the change is ready.",
