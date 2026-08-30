@@ -10,26 +10,30 @@ let latestState = readyState();
 
 function readyState() {
   return {
-    schemaVersion: 1,
-    workflow: "build-artifact",
+    schemaVersion: 2,
+    workflow: "workflow-studio",
     state: "ready",
     status: "ready",
     accepted: null,
-    title: "Ready for a guarded build",
-    summary: "Ask Codex to create one local artifact through the six-phase workflow.",
+    title: "Ready for a guarded workflow",
+    summary: "Ask Codex to create a local artifact or make a bounded workspace change through the six-phase workflow.",
     runId: null,
+    workspace: null,
     outputPath: null,
+    writePaths: [],
+    files: [],
+    fileCounts: { planned: 0, changed: 0, verified: 0 },
     durationMs: null,
     reviewFindingCount: 0,
     findings: [],
     usage: { totalTokens: 0 },
     phases: [
-      ["Frame", "Independent workers turn the brief into build guidance."],
-      ["Plan", "A planner creates explicit acceptance criteria."],
-      ["Build", "One exact-path writer creates the artifact."],
-      ["Review", "Independent reviewers inspect the real output."],
-      ["Repair", "Supported findings are corrected without scope expansion."],
-      ["Verify", "A final read-only worker checks acceptance."],
+      ["Frame", "Independent workers turn the brief into complementary guidance."],
+      ["Plan", "A planner creates acceptance criteria and an authorized change scope."],
+      ["Build", "Writable workers implement the requested artifact or workspace change."],
+      ["Review", "Independent reviewers inspect the resulting files from different lenses."],
+      ["Repair", "Supported findings are corrected within the authorized scope."],
+      ["Verify", "A final read-only worker checks every output and changed file."],
     ].map(([title, detail]) => ({ title, detail, status: "pending" })),
   };
 }
@@ -55,6 +59,79 @@ function formatNumber(value) {
   return Number.isFinite(number) ? new Intl.NumberFormat().format(number) : "0";
 }
 
+const FILE_STATUSES = new Set(["added", "modified", "deleted", "mode-changed"]);
+
+function normalizedFile(file) {
+  if (typeof file === "string") {
+    const path = file.trim();
+    return path ? { path, planned: false, changed: false, verified: false, status: null } : null;
+  }
+  if (!file || typeof file !== "object" || Array.isArray(file)) return null;
+  const path = typeof file.path === "string" ? file.path.trim() : "";
+  if (!path) return null;
+  return {
+    path,
+    planned: file.planned === true,
+    changed: file.changed === true,
+    verified: file.verified === true,
+    status: FILE_STATUSES.has(file.status) ? file.status : null,
+  };
+}
+
+function workflowFiles(state) {
+  const source = Array.isArray(state.files) ? state.files : [];
+  const files = [];
+  const seen = new Set();
+  source.forEach((file) => {
+    const normalized = normalizedFile(file);
+    if (!normalized || seen.has(normalized.path)) return;
+    seen.add(normalized.path);
+    files.push(normalized);
+  });
+
+  // v1 journals only exposed outputPath. A successful accepted run has enough
+  // evidence to synthesize all three flags; running/failed runs remain planned
+  // only so the dashboard never implies an unverified write.
+  if (!files.length && typeof state.outputPath === "string" && state.outputPath.trim()) {
+    const accepted = state.accepted === true || state.state === "accepted";
+    files.push({
+      path: state.outputPath.trim(),
+      planned: true,
+      changed: accepted,
+      verified: accepted,
+      status: null,
+    });
+  }
+  return files;
+}
+
+function workflowFileCounts(state, files) {
+  const source = state.fileCounts && typeof state.fileCounts === "object" ? state.fileCounts : {};
+  const count = (key, fallback) => {
+    const value = Number(source[key]);
+    return Number.isFinite(value) && value >= 0 ? Math.round(value) : fallback;
+  };
+  return {
+    planned: count("planned", files.filter((file) => file.planned).length),
+    changed: count("changed", files.filter((file) => file.changed).length),
+    verified: count("verified", files.filter((file) => file.verified).length),
+  };
+}
+
+function displayFileStatus(file) {
+  if (file.status) return file.status;
+  if (file.verified) return "verified";
+  if (file.changed) return "changed";
+  if (file.planned) return "planned";
+  return "observed";
+}
+
+function humanizeStatus(value) {
+  return String(value || "unknown")
+    .replaceAll("-", " ")
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
 function stateLabel(state) {
   if (state === "accepted") return "Accepted";
   if (state === "failed") return "Blocked";
@@ -71,6 +148,59 @@ function metric(label, value) {
 function detail(label, value) {
   const row = node("div", "detail-row");
   row.append(node("div", "detail-key", label), node("div", "detail-value", value));
+  return row;
+}
+
+function fileBadge(label, enabled) {
+  const badge = node("span", `file-badge ${enabled ? "is-active" : "is-inactive"}`, label);
+  badge.setAttribute("aria-label", `${label}: ${enabled ? "yes" : "no"}`);
+  return badge;
+}
+
+function renderFiles(files, counts) {
+  if (!files.length) return null;
+  const section = node("section", "files-panel");
+  const heading = node("div", "files-heading");
+  const title = node("h2", "files-title", "Files");
+  title.id = "workflow-files-title";
+  const summary = node(
+    "span",
+    "files-summary",
+    `${formatNumber(counts.planned)} planned · ${formatNumber(counts.changed)} changed · ${formatNumber(counts.verified)} verified`,
+  );
+  heading.append(title, summary);
+  section.append(heading);
+
+  const list = node("ul", "file-list");
+  list.setAttribute("aria-labelledby", title.id);
+  files.forEach((file) => {
+    const item = node("li", "file-item");
+    const head = node("div", "file-head");
+    const path = node("span", "file-path", file.path);
+    path.title = file.path;
+    const status = node("span", `file-status ${file.status || "observed"}`, humanizeStatus(displayFileStatus(file)));
+    head.append(path, status);
+    const badges = node("div", "file-badges");
+    badges.append(
+      fileBadge("Planned", file.planned),
+      fileBadge("Changed", file.changed),
+      fileBadge("Verified", file.verified),
+    );
+    item.append(head, badges);
+    list.append(item);
+  });
+  section.append(list);
+  return section;
+}
+
+function renderWriteScopes(writePaths) {
+  if (!writePaths.length) return null;
+  const row = node("div", "detail-row");
+  row.append(node("div", "detail-key", "Authorized"));
+  const list = node("ul", "scope-list");
+  list.setAttribute("aria-label", "Authorized write scopes");
+  writePaths.forEach((scope) => list.append(node("li", "scope-item", scope)));
+  row.append(list);
   return row;
 }
 
@@ -97,6 +227,10 @@ async function sendVisibleMessage(prompt, button, feedback) {
 function render(input) {
   const state = input && typeof input === "object" ? input : readyState();
   latestState = state;
+  const files = workflowFiles(state);
+  const fileCounts = workflowFileCounts(state, files);
+  const fileTotal = Math.max(fileCounts.planned, fileCounts.changed, files.length);
+  const changedFiles = files.filter((file) => file.changed);
   root.replaceChildren();
 
   const shell = node("section", "shell");
@@ -111,7 +245,7 @@ function render(input) {
 
   const titleGroup = node("div");
   titleGroup.append(
-    node("h1", "", state.title || (state.accepted ? "Artifact accepted" : "Workflow result")),
+    node("h1", "", state.title || (state.accepted ? "Workflow accepted" : "Workflow result")),
     node("p", "subtitle", state.summary || "Guarded workflow state is available."),
   );
 
@@ -119,6 +253,7 @@ function render(input) {
   metrics.append(
     metric("Duration", formatDuration(state.durationMs)),
     metric("Findings", formatNumber(state.reviewFindingCount ?? state.findings?.length ?? 0)),
+    metric("Files verified", fileTotal ? `${formatNumber(fileCounts.verified)} / ${formatNumber(fileTotal)}` : "0"),
     metric("Tokens", formatNumber(state.usage?.totalTokens ?? 0)),
   );
   hero.append(eyebrowRow, titleGroup, metrics);
@@ -139,8 +274,14 @@ function render(input) {
   shell.append(phaseList);
 
   const details = node("div", "details");
+  if (state.workflow) details.append(detail("Workflow", humanizeStatus(state.workflow)));
   if (state.runId) details.append(detail("Run", state.runId));
   if (state.outputPath) details.append(detail("Output", state.outputPath));
+  if (files.length > 1 || fileCounts.planned || fileCounts.changed || fileCounts.verified) {
+    details.append(detail("Files", `${formatNumber(fileCounts.planned)} planned · ${formatNumber(fileCounts.changed)} changed · ${formatNumber(fileCounts.verified)} verified`));
+  }
+  const scopeRow = renderWriteScopes(Array.isArray(state.writePaths) ? state.writePaths.filter((scope) => typeof scope === "string" && scope.trim()) : []);
+  if (scopeRow) details.append(scopeRow);
   if (state.sourceHash) details.append(detail("Definition", state.sourceHash.slice(0, 12)));
   if (Array.isArray(state.findings) && state.findings.length) {
     const findingRow = node("div", "detail-row");
@@ -151,27 +292,39 @@ function render(input) {
     details.append(findingRow);
   }
   if (details.childElementCount) shell.append(details);
+  const filesPanel = renderFiles(files, fileCounts);
+  if (filesPanel) shell.append(filesPanel);
 
   const actions = node("footer", "actions");
   const runAgain = node("button", "action primary", state.state === "ready" ? "Start a workflow" : "Run another");
   runAgain.type = "button";
   const feedback = node("span", "action-feedback", "");
   runAgain.addEventListener("click", () => sendVisibleMessage(
-    "Use $workflow-studio to run another guarded build-artifact workflow. Gather the task, current workspace, and one relative output path before starting the write.",
+    "Use $workflow-studio for the next substantial local artifact or bounded multi-file workspace change. Gather the concrete brief, current workspace, and exact output path or relative write scopes before starting the write.",
     runAgain,
     feedback,
   ));
   actions.append(runAgain);
 
-  if (state.outputPath) {
+  if (files.length === 1) {
     const openOutput = node("button", "action", "Open output");
     openOutput.type = "button";
     openOutput.addEventListener("click", () => sendVisibleMessage(
-      `Open the local Workflow Studio artifact at ${state.outputPath} in the workspace ${state.workspace || "for this run"}.`,
+      `Open or inspect the local Workflow Studio output at ${files[0].path} in the workspace ${state.workspace || "for this run"}.`,
       openOutput,
       feedback,
     ));
     actions.append(openOutput);
+  } else if (changedFiles.length > 1) {
+    const openChanges = node("button", "action", "Open changes");
+    openChanges.type = "button";
+    const visiblePaths = changedFiles.map((file) => file.path).join(", ");
+    openChanges.addEventListener("click", () => sendVisibleMessage(
+      `Inspect the visible Workflow Studio workspace changes for this run in ${state.workspace || "the current workspace"}. Review these changed paths: ${visiblePaths}.`,
+      openChanges,
+      feedback,
+    ));
+    actions.append(openChanges);
   }
   actions.append(feedback);
   shell.append(actions);
@@ -186,7 +339,7 @@ function applyHostContext(context) {
 }
 
 const app = new App(
-  { name: "Workflow Studio", version: "0.1.1" },
+  { name: "Workflow Studio", version: "0.2.0" },
   { availableDisplayModes: ["inline", "fullscreen"] },
   { autoResize: true },
 );
