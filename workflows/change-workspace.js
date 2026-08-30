@@ -24,7 +24,15 @@ const MAX_FINDINGS = 128;
 const MAX_FINDING_LENGTH = 8_000;
 const MAX_VERIFICATION_ITEMS = 64;
 const MAX_VERIFICATION_LENGTH = 4_000;
-const ALLOWED_ARGUMENTS = new Set(["task", "write_paths", "constraints", "source_context", "scouts", "baseline_status"]);
+const ALLOWED_ARGUMENTS = new Set([
+  "task",
+  "write_paths",
+  "constraints",
+  "source_context",
+  "scouts",
+  "baseline_status",
+  "allow_research",
+]);
 const CONFIDENCE_VALUES = new Set(["low", "medium", "high"]);
 
 const commonReportProperties = {
@@ -166,6 +174,9 @@ function validateArguments(value) {
   if (!isPlainObject(value)) throw new Error("Workflow arguments must be an object.");
   const unsupported = Object.keys(value).filter((key) => !ALLOWED_ARGUMENTS.has(key));
   if (unsupported.length) throw new Error(`Unsupported workflow argument(s): ${unsupported.join(", ")}.`);
+  if (value.allow_research !== undefined && value.allow_research !== false) {
+    throw new Error("allow_research must be false; network research is disabled for workspace workflows.");
+  }
 
   const scouts = value.scouts === undefined ? 2 : value.scouts;
   if (!Number.isInteger(scouts) || scouts < 2 || scouts > 4) {
