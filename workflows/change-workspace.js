@@ -54,10 +54,32 @@ const DISCOVERY_SCHEMA = {
 const PLANNER_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["summary", "planned_paths", "findings", "recommended_actions", "risks", "verification", "confidence"],
+  required: [
+    "summary",
+    "planned_paths",
+    "acceptance_criteria",
+    "validation",
+    "findings",
+    "recommended_actions",
+    "risks",
+    "verification",
+    "confidence",
+  ],
   properties: {
     ...commonReportProperties,
     planned_paths: { type: "array", minItems: 1, maxItems: MAX_RESULT_PATHS, items: { type: "string", minLength: 1, maxLength: MAX_RESULT_PATH_LENGTH } },
+    acceptance_criteria: {
+      type: "array",
+      minItems: 1,
+      maxItems: MAX_FINDINGS,
+      items: { type: "string", minLength: 1, maxLength: MAX_FINDING_LENGTH },
+    },
+    validation: {
+      type: "array",
+      minItems: 1,
+      maxItems: MAX_VERIFICATION_ITEMS,
+      items: { type: "string", minLength: 1, maxLength: MAX_VERIFICATION_LENGTH },
+    },
   },
 };
 
@@ -186,10 +208,17 @@ function validateResultPaths(value, name, writePaths, { required = true } = {}) 
   return paths;
 }
 
-function validateReport(value, label, writePaths, pathKey, { requirePaths = true, requireVerification = true } = {}) {
+function validateReport(
+  value,
+  label,
+  writePaths,
+  pathKey,
+  { requirePaths = true, requireVerification = true, extraKeys = [] } = {},
+) {
   if (!isPlainObject(value)) throw new Error(`${label} did not return a structured object.`);
   const allowedKeys = new Set(["summary", "findings", "recommended_actions", "risks", "verification", "confidence"]);
   if (pathKey) allowedKeys.add(pathKey);
+  for (const key of extraKeys) allowedKeys.add(key);
   const unsupported = Object.keys(value).filter((key) => !allowedKeys.has(key));
   if (unsupported.length) throw new Error(`${label} returned unsupported field(s): ${unsupported.join(", ")}.`);
   const summary = requireString(value.summary, `${label}.summary`, 8_000);
@@ -225,6 +254,25 @@ function validateReport(value, label, writePaths, pathKey, { requirePaths = true
     confidence: value.confidence,
   };
   if (pathKey) report[pathKey] = paths;
+  for (const key of extraKeys) report[key] = value[key];
+  return report;
+}
+
+function validatePlanner(value, writePaths) {
+  const report = validateReport(value, "planner", writePaths, "planned_paths", {
+    requirePaths: true,
+    extraKeys: ["acceptance_criteria", "validation"],
+  });
+  report.acceptance_criteria = validateStringArray(value.acceptance_criteria, "planner.acceptance_criteria", {
+    maxItems: MAX_FINDINGS,
+    maxItemLength: MAX_FINDING_LENGTH,
+  });
+  report.validation = validateStringArray(value.validation, "planner.validation", {
+    maxItems: MAX_VERIFICATION_ITEMS,
+    maxItemLength: MAX_VERIFICATION_LENGTH,
+  });
+  if (report.acceptance_criteria.length === 0) throw new Error("planner.acceptance_criteria must contain at least one criterion.");
+  if (report.validation.length === 0) throw new Error("planner.validation must contain at least one check.");
   return report;
 }
 
@@ -332,7 +380,7 @@ const planner = await agent(
     schema: PLANNER_SCHEMA,
   },
 );
-const plan = validateReport(planner, "planner", request.write_paths, "planned_paths", { requirePaths: true });
+const plan = validatePlanner(planner, request.write_paths);
 
 phase("Implement");
 const implementation = await agent(
