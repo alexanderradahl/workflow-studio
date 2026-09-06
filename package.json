@@ -19,6 +19,7 @@
     "build": "node scripts/build.mjs",
     "test": "npm run build && node --test tests/*.test.mjs",
     "smoke:mcp": "node tests/mcp-smoke.mjs",
+    "smoke:sandbox": "node tests/sandbox-smoke.mjs",
     "validate:release": "node scripts/validate-release.mjs",
     "check": "npm test && npm run smoke:mcp && npm run validate:release"
   },

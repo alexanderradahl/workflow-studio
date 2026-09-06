@@ -37,8 +37,9 @@ async function exerciseWorkspaceWorkflow({ invalidPath, blocked = false } = {}) 
     if (pathKey) {
       assert.match(prompt, /MUST use normalized repository-relative paths/);
       const pattern = new RegExp(spec.schema.properties[pathKey].items.pattern);
+      assert.doesNotMatch(pattern.source, /\(\?[=!<]/, "provider schemas must not use unsupported lookaround");
       assert.equal(pattern.test("src/feature.js"), true);
-      for (const unsafe of ["/workspace/src/feature.js", "../src/file.js", "src/../secret", "src/.git/config", "other/file.js", "src-extra/a.js", "src//a.js", "src/a\\b.js", "src/a\u0000b"]) {
+      for (const unsafe of ["/workspace/src/feature.js", "../src/file.js", "other/file.js", "src-extra/a.js", "src//a.js", "src/a\\b.js", "src/a\u0000b"]) {
         assert.equal(pattern.test(unsafe), false, `schema must reject ${JSON.stringify(unsafe)}`);
       }
     }
@@ -57,7 +58,7 @@ test("workspace workflow executes its stages with scoped relative report schemas
 });
 
 test("workspace workflow still rejects unsafe planner reports before writing", async () => {
-  for (const invalidPath of ["/workspace/src/feature.js", "../src/feature.js", "other/feature.js"]) {
+  for (const invalidPath of ["/workspace/src/feature.js", "../src/feature.js", "other/feature.js", "src/../secret", "src/.git/config", "src/"]) {
     await assert.rejects(() => exerciseWorkspaceWorkflow({ invalidPath }), /planner.planned_paths/);
   }
 });

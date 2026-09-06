@@ -140,7 +140,9 @@ function scopedReportSchema(schema, pathKey, writePaths) {
         description: "Normalized repository-relative paths inside authorized write_paths. Never absolute paths, URLs, traversal, .git, backslashes, or prose.",
         items: {
           ...schema.properties[pathKey].items,
-          pattern: `^(?:${scopes})(?:/(?!(?:\\.{1,2}|\\.git)(?:/|$))[^/\\\\\\u0000]+)*$`,
+          // Structured-output providers use RE2-style regexes without lookaround.
+          // The validator below independently rejects .git and traversal segments.
+          pattern: `^(?:${scopes})(?:/[^/\\\\\\u0000]+)*$`,
         },
       },
     },
@@ -174,6 +176,7 @@ function normalizeRelativePath(value, name, { maxLength = MAX_PATH_LENGTH } = {}
     throw new Error(`${name} must be a normalized relative path outside .git.`);
   }
   const parts = raw.split("/");
+  if (parts.includes(".git")) throw new Error(`${name} must not include .git metadata.`);
   if (parts.some((part) => !part || part === "." || part === "..")) {
     throw new Error(`${name} must be a normalized relative path without empty or traversal components.`);
   }

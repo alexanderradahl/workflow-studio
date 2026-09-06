@@ -242,7 +242,7 @@ if [[ "${1:-}" == "exec" ]]; then
           }
           const entries = [
             [":minimal", "read"],
-            [":tmpdir", "write"],
+            [fs.realpathSync(process.argv[4]), "write"],
             ...[
               "/System/Library/OpenSSL",
               "/Library/Developer/CommandLineTools",
@@ -264,7 +264,7 @@ if [[ "${1:-}" == "exec" ]]; then
           process.stderr.write(`codex-lean: ${error.message}\n`);
           process.exit(2);
         }
-      ' "$workspace_root" "$write_targets_json" "$original_home")" || {
+      ' "$workspace_root" "$write_targets_json" "$original_home" "$TMPDIR")" || {
       print -u2 "codex-lean: could not validate the host-generated write guard"
       exit 2
     }

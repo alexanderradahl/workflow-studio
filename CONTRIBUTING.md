@@ -9,6 +9,8 @@ npm ci
 npm run check
 ```
 
+For worker permission changes, run `npm run smoke:sandbox` on macOS with Codex installed. It makes no model calls: the native sandbox must allow linked-worktree Git reads, the exact source write, and private scratch files while denying sibling and Git-metadata writes. Live model workflow checks remain a separate release step.
+
 For plugin-specific local validation, also run:
 
 ```bash

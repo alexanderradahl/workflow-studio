@@ -69,6 +69,8 @@ test("worker wrapper applies host-generated multi-path permissions and preserves
   assert.equal(argv.includes('model_reasoning_effort="medium"'), true);
   const permissionConfig = argv.find((value) => value.startsWith("permissions={ artifact_guard="));
   assert.match(permissionConfig, /enabled=false/);
+  assert.ok(!permissionConfig.includes('\":tmpdir\"'), "temporary access must not grant all of /tmp");
+  assert.match(permissionConfig, /\/lean\/workers\/[^/]+\/tmp\"=\"write\"/);
   assert.match(permissionConfig, /\/System\/Library\/OpenSSL/);
   assert.match(permissionConfig, new RegExp(path.join(workspace, "src").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.match(permissionConfig, new RegExp(path.join(workspace, "tests").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));

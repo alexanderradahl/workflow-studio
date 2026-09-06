@@ -297,7 +297,7 @@ function findingList(record) {
       .filter((item) => typeof item === "string" && item.trim())
       .map((item) => `${worker.label || "Worker"}: ${item}`);
   });
-  return [...new Set([error, ...workerFailures, ...host, ...review, ...final].filter((item) => typeof item === "string" && item.trim()))];
+  return [...new Set([...workerFailures, error, ...host, ...review, ...final].filter((item) => typeof item === "string" && item.trim()))];
 }
 
 function phaseState(record, phase, index, phases, accepted) {

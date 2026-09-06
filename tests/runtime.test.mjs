@@ -187,7 +187,7 @@ test("failed workspace runs retain worker blockers and partial changes on initia
     });
     assert.equal(state.accepted, false);
     assert.deepEqual(state.changedPaths, partialChange ? ["src/feature.js"] : []);
-    assert.match(state.summary, partialChange ? /^Implementation blocked/ : /^planner.planned_paths/);
+    assert.match(state.summary, partialChange ? /^implementer: Vitest could not write/ : /^planner.planned_paths/);
     if (partialChange) assert.ok(state.findings.some((finding) => finding.includes("Vitest could not write")));
     const history = await getWorkflowRun(runId, { codexHome });
     assert.deepEqual(history.findings, state.findings);
