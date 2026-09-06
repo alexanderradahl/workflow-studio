@@ -337,9 +337,17 @@ const pathReportRules =
   "In JSON reports, planned_paths, changed_paths and verified_paths MUST use normalized repository-relative paths " +
   "exactly like the authorized write_paths (for example src/feature.js). Never prefix the workspace directory, " +
   "use absolute paths, add ./, use backslashes, include .git or traversal, or put explanations in path strings.";
+const validationRules =
+  "Use TMPDIR for temporary validation artifacts. Some test tools (including Vite/Vitest) write configs or caches " +
+  "beside source files even during a read-only test. If the existing command needs such writes outside write_paths, " +
+  "copy the relevant package, config, source and tests into a disposable directory under TMPDIR and run the focused " +
+  "checks there with the installed local dependencies. Do not install dependencies, change the protected source " +
+  "tree, or broaden write scopes to run tests. Report whether checks ran on the source or its validation copy. " +
+  "Missing dependencies or failed checks remain blockers; do not claim they passed.";
 const externalBoundary =
   "This is a local-only change. Do not browse the web or use network access, send messages, publish, deploy, " +
-  "commit, push, or mutate any external system. Keep every write inside the authorized write_paths. " + pathReportRules;
+  "commit, push, or mutate any external system. Keep every repository write inside the authorized write_paths. " +
+  pathReportRules + " " + validationRules;
 
 phase("Discover");
 log(`discovering a bounded workspace change with ${request.scouts} independent scouts`, {
@@ -549,7 +557,7 @@ const verification = await agent(
     `workflow change set below, confirm each remains inside authorized write_paths, and run direct focused checks for ` +
     `the requested outcome. Return verified_paths containing exactly every changed path listed below, with no extras or ` +
     `omissions. Put any blocking issue in blocking_findings; otherwise return an empty blocking_findings array and ` +
-    `concrete evidence in verification. Do not edit files. Do not commit, push, send, publish, deploy, browse, or use ` +
+    `concrete evidence in verification. Do not edit repository files; disposable TMPDIR validation copies are allowed. Do not commit, push, send, publish, deploy, browse, or use ` +
     `network access.\n\n` +
     `Task: ${request.task}\nWorkspace: ${workspace}\nAuthorized write_paths:\n${writePathText}\nConstraints:\n${constraintText}\n` +
     `Source context:\n${request.source_context}\n${repositoryRules}\n${externalBoundary}\n\n` +

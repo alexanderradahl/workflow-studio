@@ -468,6 +468,12 @@ export async function snapshotWorkspace(guard) {
   ]));
   const candidates = [...new Set(visible)].sort();
   const ignoredRoots = collapsePaths(ignored);
+  if (candidates.length > MAX_SNAPSHOT_FILES) {
+    throw new Error(`Workspace snapshot exceeds the ${MAX_SNAPSHOT_FILES}-file safety limit.`);
+  }
+  if (ignoredRoots.length > MAX_IGNORED_ENTRIES) {
+    throw new Error(`Ignored workspace inventory exceeds the ${MAX_IGNORED_ENTRIES}-entry safety limit.`);
+  }
   const context = createSnapshotContext();
   const entries = new Map();
   const visibleEntries = await mapLimit(candidates, (relativePath) => snapshotEntry(guard.workspace, relativePath, {

@@ -64,6 +64,8 @@ Before `run_workspace_workflow`, establish:
 
 The workspace workflow respects repository instructions, serializes writable workers, and independently verifies the host-observed changed-file set. A failed run can leave local changes inside the authorized scopes, so report the file-level outcome accurately.
 
+Prepare the repository's existing dependencies and focused validation commands before starting a run, within the user's authorized scope. Workers have no command networking and cannot install missing dependencies. They can use disposable validation copies under `TMPDIR` when test runners require config or cache writes outside the repository write scopes; the original source remains protected. Read-only Git inspection also works for linked worktrees.
+
 If a required value cannot be inferred safely, ask only for the smallest missing detail. A general plan or capability question is not authorization to create or modify files.
 
 ## Safety and reporting

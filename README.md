@@ -90,7 +90,7 @@ Version 0.2.1 repairs the planner path-format failures, obscured errors, and sna
 
 ## Reliable selection in crowded Codex profiles
 
-Explicit `$workflow-studio` invocation is the portable baseline. Codex can also select the skill implicitly for eligible work. To make routing more reliable in profiles with many skills, add this optional rule to `~/.codex/AGENTS.md`:
+Explicit `$workflow-studio` invocation is the portable baseline. Codex can also select the skill implicitly for eligible work. To make routing more reliable in profiles with many skills, optionally add this bounded rule to `~/.codex/AGENTS.md`:
 
 ```markdown
 Use $workflow-studio for an explicit substantial single-file artifact or multi-file repository change when separate discovery, planning, implementation, review, repair, and verification materially improve the result. Require a concrete brief, a destination, and bounded write scopes. Keep direct answers, trivial edits, read-only work, command-only tasks, and external actions on their ordinary Codex path. Invocation alone does not authorize a write.

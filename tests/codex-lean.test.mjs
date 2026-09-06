@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -148,4 +148,40 @@ test("worker wrapper rejects caller configuration that could override the guard"
       (error) => override.error.test(error.stderr),
     );
   }
+});
+
+test("worker permissions allow linked Git metadata and exact ancestor discovery files read-only", async (t) => {
+  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), "workflow-studio-linked-wrapper-")));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const home = path.join(root, "home");
+  const repository = path.join(root, "repository");
+  const workspace = path.join(root, "workspace");
+  await mkdir(path.join(home, ".codex"), { recursive: true });
+  await writeFile(path.join(home, ".codex/auth.json"), "{}\n");
+  await mkdir(repository);
+  await writeFile(path.join(root, "package.json"), "{}\n");
+  await writeFile(path.join(root, "AGENTS.md"), "Fixture instructions\n");
+  const git = (...args) => execFileP("git", ["-C", repository, ...args]);
+  await git("init");
+  await writeFile(path.join(repository, "source.js"), "// fixture\n");
+  await git("add", ".");
+  await git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-m", "fixture");
+  await git("worktree", "add", "--detach", workspace);
+  const capture = path.join(root, "captured.json");
+  const fakeCodex = path.join(root, "fake-codex.mjs");
+  await writeFile(fakeCodex, "#!/usr/bin/env node\nimport { writeFileSync } from 'node:fs';\nwriteFileSync(process.env.CAPTURE_PATH, JSON.stringify({ argv: process.argv.slice(2), locks: process.env.GIT_OPTIONAL_LOCKS }));\n");
+  await chmod(fakeCodex, 0o755);
+  await execFileP(wrapper, ["exec", "--sandbox", "read-only", "--cd", workspace, "--json", "inspect"], {
+    env: { ...process.env, HOME: home, CODEX_HOME: path.join(home, ".codex"), CODEX_REAL_BIN: fakeCodex,
+      CAPTURE_PATH: capture, ULTRACODE_LEAN_USER_HOME: path.join(root, "lean"),
+      ULTRACODE_WORKSPACE_ROOT: workspace, ULTRACODE_RESPECT_WORKSPACE_RULES: "1" },
+  });
+  const captured = JSON.parse(await readFile(capture, "utf8"));
+  const permissions = captured.argv.find((arg) => arg.startsWith("permissions={"));
+  for (const target of [path.join(repository, ".git"), path.join(repository, ".git/worktrees/workspace"), path.join(root, "package.json"), path.join(root, "AGENTS.md")]) {
+    assert.ok(permissions.includes(`${JSON.stringify(target)}="read"`), `missing exact read access for ${target}`);
+    assert.ok(!permissions.includes(`${JSON.stringify(target)}="write"`));
+  }
+  assert.equal(captured.locks, "0");
+  assert.ok(!permissions.includes(`${JSON.stringify(root)}="read"`), "do not grant the entire ancestor directory");
 });

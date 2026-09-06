@@ -34,6 +34,7 @@ export XDG_CONFIG_HOME="$lean_home/.config"
 export XDG_CACHE_HOME="$lean_home/.cache"
 export XDG_DATA_HOME="$lean_home/.local/share"
 export TMPDIR="$lean_home/tmp"
+export GIT_OPTIONAL_LOCKS=0
 
 if [[ "${1:-}" == "exec" ]]; then
   shift
@@ -167,6 +168,24 @@ if [[ "${1:-}" == "exec" ]]; then
           const root = fs.realpathSync(process.argv[1]);
           const targets = JSON.parse(process.argv[2]);
           const originalHome = fs.realpathSync(process.argv[3]);
+          const readTargets = [];
+          // Linked worktrees keep their Git database outside the working tree.
+          // Grant read access only; optional Git index refreshes are disabled above.
+          if (fs.existsSync(path.join(root, ".git"))) {
+            const { execFileSync } = require("child_process");
+            for (const flag of ["--git-dir", "--git-common-dir"]) {
+              const location = execFileSync("git", ["-C", root, "rev-parse", flag], { encoding: "utf8" }).trim();
+              readTargets.push(fs.realpathSync(path.resolve(root, location)));
+            }
+          }
+          // Node and repository instruction discovery read exact ancestor files.
+          for (let directory = path.dirname(root); ; directory = path.dirname(directory)) {
+            for (const name of ["package.json", "AGENTS.md"]) {
+              const candidate = path.join(directory, name);
+              if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) readTargets.push(fs.realpathSync(candidate));
+            }
+            if (directory === path.dirname(directory)) break;
+          }
           if (!Array.isArray(targets) || targets.length > 32) {
             throw new Error("write targets must contain at most 32 paths");
           }
@@ -236,6 +255,7 @@ if [[ "${1:-}" == "exec" ]]; then
               .filter((candidate) => fs.existsSync(candidate))
               .map((candidate) => [fs.realpathSync(candidate), "read"]),
             [root, "read"],
+            ...[...new Set(readTargets)].map((target) => [target, "read"]),
             ...validated.map((target) => [target, "write"]),
           ];
           const filesystem = entries.map(([target, access]) => `${JSON.stringify(target)}=${JSON.stringify(access)}`).join(", ");
