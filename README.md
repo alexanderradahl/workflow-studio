@@ -69,7 +69,7 @@ The dashboard shows workflow phases, findings, authorized scopes, planned/change
 - Workspace mode requires a canonical Git root with a valid `HEAD` and 1–32 normalized relative write scopes.
 - Root-wide access, `.git`, traversal, symbolic links, hard links in writable scopes, and unsafe missing parents are rejected.
 - Workers preserve applicable repository instructions and pre-existing changes. They cannot commit, push, publish, deploy, send messages, or use command networking.
-- Host snapshots detect changes in tracked, untracked, and ignored files. Changes outside the authorized scopes prevent acceptance.
+- Host snapshots detect changes in tracked, untracked, and ignored files. Ignored dependency trees use aggregate content hashes and bounded parallel hashing to keep inventories compact. Changes outside the authorized scopes prevent acceptance.
 - Report schemas require repository-relative paths. The host independently checks the reported and observed file sets.
 - `accepted: true` is the success condition. A failed run may leave partial changes; it does not imply rollback. Review the changed files before continuing.
 
