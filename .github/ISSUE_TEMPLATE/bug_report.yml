@@ -1,0 +1,21 @@
+name: Bug report
+description: Report a reproducible Workflow Studio failure.
+body:
+  - type: textarea
+    attributes:
+      label: Expected and actual behavior
+      description: Include the workflow mode and the error. Remove private prompts, paths, and credentials.
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Steps to reproduce
+      description: Prefer a small public or synthetic fixture. Include write scopes and whether the run changed files.
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Environment
+      description: Workflow Studio, Ultracode, Codex, Node, and macOS versions; ordinary checkout or linked worktree.
+    validations:
+      required: true

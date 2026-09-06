@@ -1,56 +1,33 @@
 # Releasing Workflow Studio
 
-Target release: `v0.2.0` at `github.com/alexanderradahl/workflow-studio`.
+The public repository is `alexanderradahl/workflow-studio`. Choose a license deliberately for new contributions; this project is distributed under MIT.
 
-This checklist prepares publication; do not run the external GitHub commands until publication is explicitly authorized.
+## Preflight
 
-## 1. Resolve repository policy
+1. Update the version in `package.json`, `package-lock.json`, and `.codex-plugin/plugin.json` together. Update the changelog.
+2. Run `npm ci` and `npm run check`. Confirm `git diff --check` passes and generated widget output is current.
+3. Verify a live single-file run and a bounded multi-file run with the release code. For worker or sandbox changes, use a linked Git worktree and real test tooling. Record accepted run IDs and actual file/test results in the release notes; do not publish task prompts, private paths, or raw journals.
+4. Review the tracked tree and history for credentials, private customer data, machine-specific paths, and unlicensed assets.
+5. Keep local caches, smoke artifacts, and run journals out of the repository. Never publish a development cachebuster as a release.
 
-- Choose a license, or deliberately decide to publish without one.
-- If a license is selected, add `LICENSE` and set `.codex-plugin/plugin.json` `license` to its SPDX identifier.
-- Decide whether the first remote should be public or private for an installation rehearsal.
-
-## 2. Run local preflight
-
-```bash
-npm ci
-npm run check
-python3 ~/.codex/skills/.system/skill-creator/scripts/quick_validate.py skills/workflow-studio
-python3 ~/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py .
-openspec validate improve-discovery-and-github-release
-openspec validate support-multifile-workflows --strict
-git status --short
-```
-
-Require a clean tree and confirm the committed plugin version is `0.2.0` without a development cachebuster.
-
-## 3. Create the GitHub repository
-
-Only after explicit approval:
+## Publish an authorized release
 
 ```bash
-gh repo create alexanderradahl/workflow-studio --source=. --remote=origin --push --public
+git push origin main
+git tag -a v<VERSION> -m "Workflow Studio v<VERSION>"
+git push origin v<VERSION>
+gh release create v<VERSION> --title "Workflow Studio v<VERSION>" --notes-file release-notes.md
 ```
 
-Use `--private` instead of `--public` for a private rehearsal.
+Store the notes file outside the tracked tree or remove it after release. Wait for the exact release commit's GitHub Actions run to pass.
 
-## 4. Verify GitHub marketplace installation
+## Verify installation
 
 ```bash
 codex plugin marketplace add alexanderradahl/workflow-studio
 codex plugin add workflow-studio@workflow-studio
 ```
 
-Start a fresh Codex chat and verify explicit `$workflow-studio` invocation for both one substantial artifact and one bounded multi-file repository change. Confirm the multi-file run changes only the requested scopes and the dashboard renders its file-level evidence. Then verify an eligible implicit-routing example and an ineligible simple-edit example. If a crowded skill catalog prevents reliable implicit selection, repeat with the bounded `~/.codex/AGENTS.md` routing rule documented in the README and disclose that requirement in the release notes.
+Start a new Codex chat and confirm both fixed workflows are available. Check the installed manifest version and bundled source against the release. Do not treat installation as proof that an already-running MCP server reloaded.
 
-## 5. Tag and publish
-
-Only after installation verification:
-
-```bash
-git tag -a v0.2.0 -m "Workflow Studio v0.2.0"
-git push origin v0.2.0
-gh release create v0.2.0 --generate-notes --title "Workflow Studio v0.2.0"
-```
-
-Rollback before publication by deleting the local tag. After publication, use a follow-up patch release rather than rewriting the published tag.
+Fix a published mistake in a follow-up release; do not rewrite published tags.

@@ -1,6 +1,6 @@
 {
   "name": "workflow-studio-codex-plugin",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "type": "module",
   "description": "Guarded visual multi-agent artifact and repository workflows for Codex.",
@@ -27,5 +27,6 @@
   },
   "devDependencies": {
     "esbuild": "^0.25.9"
-  }
+  },
+  "license": "MIT"
 }

@@ -1,117 +1,118 @@
-# Workflow Studio
+# Workflow Studio for Codex
 
-Workflow Studio is a Codex plugin for running guarded multi-agent workflows and inspecting their results as an inline visual dashboard. It supports both a substantial single-file artifact and a bounded multi-file repository change.
+[![CI](https://github.com/alexanderradahl/workflow-studio/actions/workflows/ci.yml/badge.svg)](https://github.com/alexanderradahl/workflow-studio/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/alexanderradahl/workflow-studio)](https://github.com/alexanderradahl/workflow-studio/releases)
 
-![Workflow Studio dashboard](assets/workflow-studio-preview.png)
+Turn a substantial coding request into a scoped plan, implementation, independent review, repair, and verified result—inside Codex, with an inline dashboard.
 
-Release candidate: `v0.2.0`. The GitHub repository and license have not been published or selected yet.
+Workflow Studio is an open-source Codex plugin built on [Ultracode](https://github.com/just-every/plugin-ultracode). It brings a Claude-style workflow to Codex while keeping repository writes bounded and acceptance tied to observed file changes.
 
-## When to use it
+![Example Workflow Studio dashboard showing phases, file changes, and verification](assets/workflow-studio-preview.png)
 
-Use Workflow Studio when substantial local write work materially benefits from separate discovery, planning, implementation, review, repair, and final verification:
+*Illustrative dashboard. Actual timing and token usage depend on the task.*
 
-- Single-file mode creates one substantial artifact such as a decision brief, implementation plan, launch checklist, research synthesis, or specification.
-- Workspace mode implements a substantial feature, refactor, or migration across a narrow set of files or directories in an existing Git repository.
+## Install
 
-Keep ordinary Codex execution for simple edits, direct answers, read-only analysis, command-only work, debugging or status checks without an implementation request, external actions, or tasks prioritizing minimum latency and cost.
+Requirements: **macOS**, **Node.js 24+**, **Git**, an authenticated **Codex** installation with custom filesystem permission profiles, and **Ultracode**. Other operating systems have not been validated; the worker wrapper uses macOS tooling and zsh.
 
-Explicit invocation remains available:
-
-```text
-$workflow-studio Create a launch brief at docs/launch-brief.md.
-$workflow-studio Implement the requested feature across src/billing and tests/billing.
-```
-
-Codex may also select the Skill implicitly when the eligibility boundary is met.
-
-## Reliable selection in crowded Codex profiles
-
-Profiles with many installed skills or plugins can have competing discovery descriptions. Explicit `$workflow-studio` invocation remains the portable baseline. If you want reliable automatic routing on your own machine, add this bounded rule to `~/.codex/AGENTS.md`:
-
-```markdown
-# Workflow Studio Routing
-
-- Use `$workflow-studio` for an explicit create/write request when the deliverable is a substantial single-file artifact or multi-file repository change and separate discovery, planning, implementation, review, repair, and verification materially improve the result.
-- For multi-file work, require a concrete implementation request, an existing Git worktree, and narrow writable file or directory scopes; use the fixed workspace workflow rather than inventing commands or broadening the scope.
-- Do not use Workflow Studio for direct answers, planning or review-only work, trivial edits, command/test/debug/status work, external actions, or requests prioritizing minimum latency or cost.
-- Explicit `$workflow-studio` invocation expresses workflow intent but does not authorize a write; require a concrete artifact brief and destination or a concrete repository change with bounded write scopes before starting a writable workflow.
-```
-
-The plugin does not edit global Codex instructions during installation. This opt-in rule is visible in every workspace while preserving the same bounded eligibility gate.
-
-## How it works
-
-```text
-Codex chat
-  -> Workflow Studio Skill eligibility gate
-  -> fixed local MCP tool
-       -> build-artifact: one exact output file
-       -> change-workspace: bounded Git repository paths
-  -> guarded multi-agent workflow
-  -> host-observed file verification
-  -> trusted run journal
-  -> inline MCP App dashboard
-```
-
-The single-file workflow runs Frame → Plan → Build → Review → Repair → Verify. Its writable workers receive only the exact requested output path.
-
-The workspace workflow runs Discover → Plan → Implement → Review → Repair → Verify. It requires the absolute root of a Git worktree with a valid `HEAD` and 1–32 normalized relative write scopes. It rejects whole-workspace, `.git`, absolute, traversal, linked, and unsafe missing-parent paths. Writable phases are serialized; reviewers and the final verifier are read-only. Repository instructions remain active.
-
-Both writable tools expose fixed schemas only: no arbitrary command, binary, script, flag, environment, networking, or research surface. The host snapshots Git-visible and authorized-scope state before and after the run, rejects observed changes outside the requested scopes, and cross-checks worker-reported files before accepting the result. A failed workspace run can leave local changes inside authorized scopes, and the dashboard reports those files rather than implying rollback.
-
-## Visual dashboard
-
-Every tool result carries the same inline MCP App. The dashboard shows:
-
-- current state and workflow phase;
-- planned, changed, and verified file counts;
-- authorized write scopes and per-file status badges;
-- blocking findings, timing, and usage;
-- “Open output” for a single file or “Open changes” for a multi-file result.
-
-Use `show_workflow_dashboard` for the latest trusted run or `get_workflow_run` for a specific run id.
-
-## Install after publication
-
-Once `github.com/alexanderradahl/workflow-studio` is published:
+Install the engine and this plugin:
 
 ```bash
+codex plugin marketplace add just-every/plugins
+codex plugin add ultracode@just-every
 codex plugin marketplace add alexanderradahl/workflow-studio
 codex plugin add workflow-studio@workflow-studio
 ```
 
-Start a new Codex chat after installation so the Skill and MCP server load.
+Start a **new Codex chat** so the skill and MCP server load. Node must be available to the Codex app. No private shell helper, additional API key, or repository-local npm installation is needed to run the installed plugin. Workers use your existing Codex authentication and consume your account's model usage.
 
-Useful prompts:
+The runtime discovers Codex on `PATH` or in the supported macOS app locations, and Ultracode in its installed `just-every` plugin cache. It does not install or update these dependencies automatically.
+
+## Try it
 
 ```text
-Use $workflow-studio to implement this bounded multi-file repository change.
-Use $workflow-studio to create a substantial single-file implementation brief.
+$workflow-studio Implement pagination across src/search and tests/search.
+$workflow-studio Create a launch brief at docs/launch-brief.md.
 Show the latest Workflow Studio dashboard.
-Explain whether Workflow Studio is appropriate for this task.
 ```
 
-## Development
+Describe the outcome, constraints, and relevant checks. Codex inspects the repository and establishes the exact write scopes before execution. Prepare the target repository's dependencies first; workflow workers have command networking disabled.
 
-Requirements: macOS, Node.js 24 or newer, an authenticated Codex installation, and Ultracode at `~/.local/bin/ultracode`.
+| Use it for | Use ordinary Codex for |
+| --- | --- |
+| A substantial single-file artifact or multi-file repository change | Small edits, direct answers, read-only analysis |
+| Changes that benefit from separate planning and independent review | Command-only work, status checks, external actions |
+| Bounded work in an existing Git worktree | Tasks where minimum latency or cost matters most |
+
+## How it works
+
+```text
+Discover → Plan → Implement → Review → Repair → Verify
+  parallel          one       parallel   one    read-only
+  read-only         writer    read-only   writer
+```
+
+Single-file mode uses **Frame → Plan → Build → Review → Repair → Verify**. Repair runs only when reviewers find actionable issues. Workspace writers run sequentially so they do not race each other. Final acceptance checks the actual changed-file set against the writer and verifier reports.
+
+| Tool | Purpose |
+| --- | --- |
+| `run_build_artifact` | Create and verify one exact local output file |
+| `run_workspace_workflow` | Implement a bounded change in an existing Git worktree |
+| `show_workflow_dashboard` | Inspect the latest trusted run |
+| `get_workflow_run` | Inspect a specific trusted run ID |
+
+The dashboard shows workflow phases, findings, authorized scopes, planned/changed/verified files, duration, and usage. Its Open output / Open changes actions hand the result back to Codex.
+
+## Write boundaries and verification
+
+- Workspace mode requires a canonical Git root with a valid `HEAD` and 1–32 normalized relative write scopes.
+- Root-wide access, `.git`, traversal, symbolic links, hard links in writable scopes, and unsafe missing parents are rejected.
+- Workers preserve applicable repository instructions and pre-existing changes. They cannot commit, push, publish, deploy, send messages, or use command networking.
+- Host snapshots detect changes in tracked, untracked, and ignored files. Changes outside the authorized scopes prevent acceptance.
+- Report schemas require repository-relative paths. The host independently checks the reported and observed file sets.
+- `accepted: true` is the success condition. A failed run may leave partial changes; it does not imply rollback. Review the changed files before continuing.
+
+The plugin exposes fixed task arguments; callers cannot pass arbitrary workflow scripts, binaries, flags, environment variables, or network overrides. See [SECURITY.md](SECURITY.md) for reporting and limitations.
+
+## Troubleshooting
+
+| Symptom | Next step |
+| --- | --- |
+| Missing Codex or Ultracode | Follow the dependency named in the error, then start a new chat |
+| Required tests cannot find dependencies | Prepare dependencies in the target worktree before starting the workflow |
+| A test runner needs temporary files outside the write scope | Use a disposable validation copy under `TMPDIR`; keep source writes scoped |
+| A run fails after some edits | Inspect its actual worker error and changed-file evidence before continuing |
+| Tools still behave like an older release | Reinstall the plugin and start a new Codex chat |
+| The host rejects a writable tool before launch | Resolve the host's approval policy; a tool rejection is not a workflow execution |
+
+Version 0.2.1 repairs the planner path-format failures, obscured errors, and snapshot bottleneck found in real workspace runs. See the [changelog](CHANGELOG.md) for details.
+
+## Reliable selection in crowded Codex profiles
+
+Explicit `$workflow-studio` invocation is the portable baseline. Codex can also select the skill implicitly for eligible work. To make routing more reliable in profiles with many skills, add this optional rule to `~/.codex/AGENTS.md`:
+
+```markdown
+Use $workflow-studio for an explicit substantial single-file artifact or multi-file repository change when separate discovery, planning, implementation, review, repair, and verification materially improve the result. Require a concrete brief, a destination, and bounded write scopes. Keep direct answers, trivial edits, read-only work, command-only tasks, and external actions on their ordinary Codex path. Invocation alone does not authorize a write.
+```
+
+The plugin does not edit global Codex instructions during installation.
+
+## Develop and contribute
 
 ```bash
+git clone https://github.com/alexanderradahl/workflow-studio.git
+cd workflow-studio
 npm ci
 npm run check
 ```
 
-Important files:
+The test suite runs without model calls or Codex credentials. It covers workflow execution with controlled worker reports, runtime acceptance evidence, path guards, workspace snapshots, worker arguments, MCP stdio, discovery, and packaging. Live model verification is separate and uses account usage.
 
-- `.codex-plugin/plugin.json` - plugin metadata and discovery copy
-- `skills/workflow-studio/SKILL.md` - eligibility and conversational routing
-- `mcp/server.mjs` - fixed MCP tools and inline UI resource
-- `workflows/build-artifact.js` - exact-file workflow
-- `workflows/change-workspace.js` - bounded multi-file workflow
-- `src/workspace-guard.mjs` - path, snapshot, and acceptance guards
-- `src/widget.js` - dashboard app
+The inline widget is bundled into `dist/workflow-studio-widget.html`; the installed server uses Node's built-in modules. Run `npm run build` after changing widget sources and commit the generated file. CI checks that the bundle is current.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for change guidance and [RELEASING.md](RELEASING.md) for the deliberate publication checklist.
+Start with [CONTRIBUTING.md](CONTRIBUTING.md), [release guidance](RELEASING.md), and the [issues](https://github.com/alexanderradahl/workflow-studio/issues).
 
-## Release and license status
+## License and attribution
 
-No open-source license has been selected. Before making the repository public, choose a license (or intentionally publish without one), update the plugin manifest, and follow [RELEASING.md](RELEASING.md).
+[MIT](LICENSE), copyright Alexander Benz. Workflow Studio uses the MIT-licensed Ultracode engine as a separately installed dependency and bundles the MCP Apps client with its [license notices](THIRD_PARTY_NOTICES.md). This is an independent project; it is not an official OpenAI or Anthropic product.

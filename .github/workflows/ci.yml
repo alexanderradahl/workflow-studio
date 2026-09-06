@@ -4,12 +4,17 @@ on:
   push:
   pull_request:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
 jobs:
   validate:
     runs-on: macos-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -18,3 +23,5 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run check
+      - name: Verify generated widget is current
+        run: git diff --exit-code -- dist/workflow-studio-widget.html

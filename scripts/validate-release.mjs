@@ -23,6 +23,9 @@ const requiredFiles = [
   "CONTRIBUTING.md",
   "RELEASING.md",
   "SECURITY.md",
+  "LICENSE",
+  "THIRD_PARTY_NOTICES.md",
+  "src/runtime-dependencies.mjs",
   "assets/workflow-studio-preview.png",
   "dist/workflow-studio-widget.html",
   "skills/workflow-studio/SKILL.md",
@@ -45,7 +48,9 @@ const [manifest, packageJson, marketplace, skill, openaiYaml, widget, readme, re
 ]);
 
 assert.equal(manifest.name, "workflow-studio");
-assert.equal(manifest.version, "0.2.0");
+assert.match(manifest.version, /^\d+\.\d+\.\d+$/);
+assert.equal(manifest.license, "MIT");
+assert.equal(packageJson.license, "MIT");
 assert.equal(packageJson.version, manifest.version);
 assert.equal(manifest.repository, repositoryUrl);
 assert.equal(manifest.homepage, repositoryUrl);

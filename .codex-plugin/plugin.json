@@ -1,6 +1,6 @@
 {
   "name": "workflow-studio",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Create and independently verify substantial single-file artifacts or bounded multi-file repository changes through guarded visual workflows.",
   "author": {
     "name": "Alexander Benz",
@@ -42,5 +42,6 @@
       "./assets/workflow-studio-preview.png"
     ],
     "websiteURL": "https://github.com/alexanderradahl/workflow-studio"
-  }
+  },
+  "license": "MIT"
 }

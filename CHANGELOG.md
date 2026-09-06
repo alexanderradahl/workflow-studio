@@ -1,6 +1,14 @@
 # Changelog
 
-## 0.2.0 - Unreleased
+## 0.2.1 - 2026-09-06
+
+- Require normalized repository-relative paths in worker schemas and prompts to prevent planner formatting failures.
+- Preserve the actual workflow and worker errors in initial results and dashboard/history views.
+- Scale workspace snapshots beyond ordinary dependency-tree sizes while preserving ignored-file change detection.
+- Discover installed Codex and Ultracode directly, removing private helper and fixed app-path assumptions.
+- Add regressions from real failed runs and prepare the MIT-licensed public distribution.
+
+## 0.2.0 - 2026-08-30
 
 - Added a guarded `change-workspace` workflow for substantial bounded multi-file repository changes.
 - Added fixed multi-path permissions, active repository instructions, and host-observed changed-file acceptance evidence.
