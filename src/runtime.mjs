@@ -18,6 +18,7 @@ import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import { resolveCodexBinary, resolveUltracodeCli } from "./runtime-dependencies.mjs";
 import {
+  assertGuardedWorkspaceLocation,
   compareWorkspaceSnapshots,
   pathWithinWritePaths,
   resolveGuardedWorkspace,
@@ -133,6 +134,7 @@ export function validateRunArguments(value) {
 export async function resolveGuardedOutput(workspaceInput, outputInput) {
   if (!path.isAbsolute(workspaceInput)) throw new Error("workspace must be an absolute path.");
   const workspace = await realpath(workspaceInput);
+  assertGuardedWorkspaceLocation(workspace);
   if (!(await stat(workspace)).isDirectory()) throw new Error("workspace must resolve to an existing directory.");
 
   const outputPath = outputInput.replaceAll("\\", "/");
@@ -885,7 +887,6 @@ export async function runWorkspaceWorkflow(rawArguments, options = {}) {
     maxAgents: 12,
     extraEnvironment: {
       ULTRACODE_ALLOWED_WRITE_PATHS_JSON: JSON.stringify(guard.targets),
-      ULTRACODE_RESPECT_WORKSPACE_RULES: "1",
     },
   });
 

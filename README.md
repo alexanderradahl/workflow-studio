@@ -67,8 +67,10 @@ The dashboard shows workflow phases, findings, authorized scopes, planned/change
 ## Write boundaries and verification
 
 - Workspace mode requires a canonical Git root with a valid `HEAD` and 1–32 normalized relative write scopes.
+- Workspaces and their Git metadata must live outside shared `/tmp` and `/var/tmp` directories, where Codex grants shell write access independently of custom scopes.
 - Root-wide access, `.git`, traversal, symbolic links, hard links in writable scopes, and unsafe missing parents are rejected.
 - Workers preserve applicable repository instructions and pre-existing changes. They cannot commit, push, publish, deploy, send messages, or use command networking.
+- Repository `AGENTS.md` instructions stay active. Inherited command-approval `.rules` files are disabled so unrestricted command grants cannot bypass worker scopes.
 - Host snapshots detect changes in tracked, untracked, and ignored files. Ignored dependency trees use aggregate content hashes and bounded parallel hashing to keep inventories compact. Changes outside the authorized scopes prevent acceptance.
 - Report schemas require repository-relative paths. The host independently checks the reported and observed file sets.
 - `accepted: true` is the success condition. A failed run may leave partial changes; it does not imply rollback. Review the changed files before continuing.
@@ -82,6 +84,7 @@ The plugin exposes fixed task arguments; callers cannot pass arbitrary workflow 
 | Missing Codex or Ultracode | Follow the dependency named in the error, then start a new chat |
 | Required tests cannot find dependencies | Prepare dependencies in the target worktree before starting the workflow |
 | A test runner needs temporary files outside the write scope | Use a disposable validation copy under `TMPDIR`; keep source writes scoped |
+| Workspace is in shared system temporary storage | Use a project directory such as `~/Projects`, including the linked worktree’s main repository |
 | A run fails after some edits | Inspect its actual worker error and changed-file evidence before continuing |
 | Tools still behave like an older release | Reinstall the plugin and start a new Codex chat |
 | The host rejects a writable tool before launch | Resolve the host's approval policy; a tool rejection is not a workflow execution |

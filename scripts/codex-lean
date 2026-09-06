@@ -35,6 +35,8 @@ export XDG_CACHE_HOME="$lean_home/.cache"
 export XDG_DATA_HOME="$lean_home/.local/share"
 export TMPDIR="$lean_home/tmp"
 export GIT_OPTIONAL_LOCKS=0
+# Workers own their tool transport; do not inherit the parent desktop thread.
+unset CODEX_APP_TOOLS_PIPE_PATH CODEX_THREAD_ID CODEX_SESSION_ID CODEX_INTERNAL_ORIGINATOR_OVERRIDE
 
 if [[ "${1:-}" == "exec" ]]; then
   shift
@@ -166,6 +168,9 @@ if [[ "${1:-}" == "exec" ]]; then
           const fs = require("fs");
           const path = require("path");
           const root = fs.realpathSync(process.argv[1]);
+          if (["/private/tmp", "/private/var/tmp", "/tmp", "/var/tmp"].some(base => root === base || root.startsWith(`${base}/`))) {
+            throw new Error("use a workspace outside shared system temporary directories; Codex shell permissions cannot enforce narrow write scopes there");
+          }
           const targets = JSON.parse(process.argv[2]);
           const originalHome = fs.realpathSync(process.argv[3]);
           const readTargets = [];
@@ -175,7 +180,11 @@ if [[ "${1:-}" == "exec" ]]; then
             const { execFileSync } = require("child_process");
             for (const flag of ["--git-dir", "--git-common-dir"]) {
               const location = execFileSync("git", ["-C", root, "rev-parse", flag], { encoding: "utf8" }).trim();
-              readTargets.push(fs.realpathSync(path.resolve(root, location)));
+              const metadataPath = fs.realpathSync(path.resolve(root, location));
+              if (["/private/tmp", "/private/var/tmp", "/tmp", "/var/tmp"].some(base => metadataPath === base || metadataPath.startsWith(`${base}/`))) {
+                throw new Error("Git metadata must also live outside shared system temporary directories");
+              }
+              readTargets.push(metadataPath);
             }
           }
           // Node and repository instruction discovery read exact ancestor files.
@@ -269,12 +278,6 @@ if [[ "${1:-}" == "exec" ]]; then
       exit 2
     }
 
-    typeset -a rule_args
-    rule_args=()
-    if [[ "${ULTRACODE_RESPECT_WORKSPACE_RULES:-0}" != "1" ]]; then
-      rule_args+=("--ignore-rules")
-    fi
-
     typeset -a guarded_path_entries
     guarded_path_entries=()
     for candidate in ${(s/:/)original_path}; do
@@ -298,7 +301,7 @@ if [[ "${1:-}" == "exec" ]]; then
     command_status=0
     "$real_codex" exec \
       --ignore-user-config \
-      "${rule_args[@]}" \
+      --ignore-rules \
       -c 'approval_policy="never"' \
       -c 'default_permissions="artifact_guard"' \
       -c 'web_search="disabled"' \

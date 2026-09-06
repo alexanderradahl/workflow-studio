@@ -19,6 +19,8 @@ try {
   await mkdir(repository);
   await writeFile(path.join(repository, "allowed.txt"), "before\n");
   await writeFile(path.join(repository, "protected.txt"), "protected\n");
+  await mkdir(path.join(repository, "node_modules/.vite"), { recursive: true });
+  await writeFile(path.join(repository, "node_modules/.vite/results.json"), "{}\n");
   const git = (...args) => exec("git", ["-C", repository, ...args]);
   await git("init");
   await git("add", ".");
@@ -40,7 +42,7 @@ const probe = ${JSON.stringify(`
     fs.writeFileSync('allowed.txt', 'after\\n');
     fs.writeFileSync(path.join(process.env.TMPDIR, 'cache.txt'), 'scratch');
     const denied = [];
-    for (const target of ['protected.txt', ${JSON.stringify(path.join(repository, '.git/config'))}]) {
+    for (const target of ['protected.txt', 'node_modules/.vite/results.json', ${JSON.stringify(path.join(repository, '.git/config'))}]) {
       try { fs.appendFileSync(target, 'forbidden'); }
       catch (error) { if (['EPERM', 'EACCES', 'EROFS'].includes(error.code)) denied.push(target); else throw error; }
     }
@@ -58,7 +60,7 @@ writeFileSync(process.env.CAPTURE_PATH, output);
         ULTRACODE_ALLOWED_WRITE_PATHS_JSON: JSON.stringify([path.join(workspace, "allowed.txt")]),
         ULTRACODE_RESPECT_WORKSPACE_RULES: "1" },
     });
-  assert.equal(JSON.parse(await readFile(capture, "utf8")).denied.length, 2);
+  assert.equal(JSON.parse(await readFile(capture, "utf8")).denied.length, 3);
   assert.equal(await readFile(path.join(workspace, "allowed.txt"), "utf8"), "after\n");
   assert.equal(await readFile(path.join(workspace, "protected.txt"), "utf8"), "protected\n");
   console.log("Native sandbox passed: linked Git reads, scoped writes and private scratch work; sibling and Git metadata writes denied.");

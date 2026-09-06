@@ -6,8 +6,10 @@
 - Preserve the actual workflow and worker errors in initial results and dashboard/history views.
 - Scale workspace snapshots beyond ordinary dependency-tree sizes while preserving ignored-file change detection.
 - Discover installed Codex and Ultracode directly, removing private helper and fixed app-path assumptions.
-- Allow read-only linked-worktree metadata and exact ancestor discovery files; isolate scratch access to each worker's private temporary directory.
+- Allow read-only linked-worktree metadata and exact ancestor discovery files; give each worker a private temporary directory for validation caches.
+- Disable inherited command-approval rules that can bypass a guarded worker's sandbox, while continuing to load repository instructions.
 - Support temporary validation copies for tools that write caches next to source, and verify permissions with a native sandbox smoke check.
+- Reject shared system temporary workspaces and Git databases, where Codex shell sandbox defaults cannot enforce narrow scopes.
 - Add regressions from real failed runs and prepare the MIT-licensed public distribution.
 
 ## 0.2.0 - 2026-08-30

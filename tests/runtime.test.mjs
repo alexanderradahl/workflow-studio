@@ -26,6 +26,11 @@ import {
 
 const execFileP = promisify(execFile);
 
+test("both writable modes reject shared system temporary workspaces before launching", async () => {
+  await assert.rejects(() => resolveGuardedOutput("/tmp", "fixture.md"), /outside shared system temporary directories/);
+  await assert.rejects(() => resolveGuardedWorkspace("/tmp", ["src"]), /outside shared system temporary directories/);
+});
+
 async function temporaryWorkspace(t) {
   const root = await mkdtemp(path.join(os.tmpdir(), "workflow-studio-test-"));
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -520,7 +525,7 @@ test("workspace runner accepts two authorized observed changes and persists host
     assert.equal(file, "/usr/bin/true");
     assert.equal(argv[0], `@${WORKSPACE_WORKFLOW_SOURCE_PATH}`);
     assert.equal(options.env.ULTRACODE_WORKSPACE_ROOT, resolvedWorkspace);
-    assert.equal(options.env.ULTRACODE_RESPECT_WORKSPACE_RULES, "1");
+    assert.equal(options.env.ULTRACODE_RESPECT_WORKSPACE_RULES, undefined);
     assert.deepEqual(JSON.parse(options.env.ULTRACODE_ALLOWED_WRITE_PATHS_JSON), [
       path.join(resolvedWorkspace, "src"),
       path.join(resolvedWorkspace, "tests"),

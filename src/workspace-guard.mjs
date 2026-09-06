@@ -157,12 +157,23 @@ function collapseScopes(writePaths) {
   return kept;
 }
 
+// Codex shell sandboxes grant shared macOS scratch directories independently
+// of custom file scopes. Refuse those locations before starting any worker.
+export function assertGuardedWorkspaceLocation(workspace) {
+  if (["/private/tmp", "/private/var/tmp", "/tmp", "/var/tmp"].some((root) => inside(root, workspace))) {
+    throw new Error("Use a workspace outside shared system temporary directories (for example ~/Projects). Codex shell permissions cannot enforce narrow write scopes there.");
+  }
+}
+
 export async function resolveGuardedWorkspace(workspaceInput, writePathsInput) {
   if (!path.isAbsolute(workspaceInput)) throw new Error("workspace must be an absolute path.");
   const workspace = await realpath(workspaceInput);
+  assertGuardedWorkspaceLocation(workspace);
   if (!(await stat(workspace)).isDirectory()) throw new Error("workspace must resolve to an existing directory.");
   const gitRoot = await realpath((await git(workspace, ["rev-parse", "--show-toplevel"])).trim());
   if (gitRoot !== workspace) throw new Error("workspace must be the canonical Git worktree root.");
+  const commonGitDir = await realpath(path.resolve(workspace, (await git(workspace, ["rev-parse", "--git-common-dir"])).trim()));
+  assertGuardedWorkspaceLocation(commonGitDir);
   const head = (await git(workspace, ["rev-parse", "--verify", "HEAD"])).trim();
   if (!/^[0-9a-f]{40,64}$/i.test(head)) throw new Error("workspace must have a valid Git HEAD.");
 

@@ -25,7 +25,7 @@ test("worker wrapper applies host-generated multi-path permissions and preserves
   await writeFile(path.join(codexHome, "auth.json"), "{}\n");
   await writeFile(
     fakeCodex,
-    "#!/usr/bin/env node\nimport { writeFileSync } from 'node:fs';\nwriteFileSync(process.env.CAPTURE_PATH, JSON.stringify({ argv: process.argv.slice(2), path: process.env.PATH }));\n",
+    "#!/usr/bin/env node\nimport { writeFileSync } from 'node:fs';\nwriteFileSync(process.env.CAPTURE_PATH, JSON.stringify({ argv: process.argv.slice(2), path: process.env.PATH, parentRouting: Object.keys(process.env).filter(key => ['CODEX_APP_TOOLS_PIPE_PATH','CODEX_THREAD_ID','CODEX_SESSION_ID','CODEX_INTERNAL_ORIGINATOR_OVERRIDE'].includes(key)) }));\n",
   );
   await chmod(fakeCodex, 0o755);
   await execFileP(wrapper, [
@@ -56,14 +56,19 @@ test("worker wrapper applies host-generated multi-path permissions and preserves
       ]),
       ULTRACODE_PERMISSIONS_OVERRIDE: 'web_search="live"',
       ULTRACODE_RESPECT_WORKSPACE_RULES: "1",
+      CODEX_APP_TOOLS_PIPE_PATH: "/tmp/parent-tools-pipe",
+      CODEX_THREAD_ID: "parent-thread",
+      CODEX_SESSION_ID: "parent-session",
+      CODEX_INTERNAL_ORIGINATOR_OVERRIDE: "parent-origin",
     },
   });
 
   const captured = JSON.parse(await readFile(capture, "utf8"));
-  const { argv } = captured;
+  const argv = captured.argv;
+  assert.deepEqual(captured.parentRouting, [], "worker tools must not route through the parent desktop thread");
   assert.equal(argv[0], "exec");
   assert.equal(argv.includes("--ignore-user-config"), true);
-  assert.equal(argv.includes("--ignore-rules"), false);
+  assert.equal(argv.includes("--ignore-rules"), true, "command approval rules must not bypass the worker sandbox");
   assert.equal(argv.includes("--sandbox"), false);
   assert.equal(argv.includes("workspace-write"), false);
   assert.equal(argv.includes('model_reasoning_effort="medium"'), true);
