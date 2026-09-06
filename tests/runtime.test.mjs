@@ -9,6 +9,7 @@ import { test } from "node:test";
 import {
   WORKSPACE_WORKFLOW_SOURCE_PATH,
   WORKFLOW_SOURCE_PATH,
+  WORKER_RUNNER_PATH,
   compareWorkspaceSnapshots,
   getLatestWorkflowRun,
   getWorkflowRun,
@@ -148,6 +149,51 @@ function workspaceJournal({ runId, workspace, codexHome, workflowHash, changedPa
     },
   };
 }
+
+test("failed history exposes the actual planner error before a generic host symptom", () => {
+  const state = normalizeJournal({
+    status: "failed", definition_ref: { id: "change-workspace" },
+    error: "planner.planned_paths[0] must be a normalized relative path outside .git.",
+    workflow_studio: { accepted: false, blocking_findings: ["The workspace workflow produced no observed file changes."] },
+  });
+  assert.match(state.summary, /^planner.planned_paths/);
+  assert.equal(state.findings.length, 2);
+  assert.equal(state.accepted, false);
+});
+
+test("failed workspace runs retain worker blockers and partial changes on initial and history reads", async (t) => {
+  for (const partialChange of [false, true]) {
+    const workspace = await temporaryGitWorkspace(t);
+    const codexHome = await mkdtemp(path.join(os.tmpdir(), "workflow-studio-failure-"));
+    t.after(() => rm(codexHome, { recursive: true, force: true }));
+    await mkdir(path.join(codexHome, "ultracode", "runs"), { recursive: true });
+    const runId = `ultra-20260906073515-failure-${partialChange}`;
+    const workflowHash = await sha256File(WORKSPACE_WORKFLOW_SOURCE_PATH);
+    const executeFile = async () => {
+      const record = workspaceJournal({ runId, workspace: await realpath(workspace), codexHome, workflowHash, changedPaths: [] });
+      record.status = "failed";
+      record.error = partialChange ? "Implementation blocked" : "planner.planned_paths[0] must be a normalized relative path outside .git.";
+      record.result = null;
+      record.workers = record.workers.slice(0, partialChange ? 4 : 3);
+      if (partialChange) {
+        record.workers.at(-1).result.blocking_findings = ["Vitest could not write its temporary config"];
+        await writeFile(path.join(workspace, "src/feature.js"), "export const feature = true;\n");
+      }
+      await writeFile(record.state_path, JSON.stringify(record));
+      return { exitCode: 0, stdout: JSON.stringify(record), stderr: "" };
+    };
+    const state = await runWorkspaceWorkflow({ task: "Fix fixture", workspace, write_paths: ["src"] }, {
+      codexHome, ultracodeBin: "/usr/bin/true", codexRealBin: "/usr/bin/true", executeFile,
+    });
+    assert.equal(state.accepted, false);
+    assert.deepEqual(state.changedPaths, partialChange ? ["src/feature.js"] : []);
+    assert.match(state.summary, partialChange ? /^Implementation blocked/ : /^planner.planned_paths/);
+    if (partialChange) assert.ok(state.findings.some((finding) => finding.includes("Vitest could not write")));
+    const history = await getWorkflowRun(runId, { codexHome });
+    assert.deepEqual(history.findings, state.findings);
+    assert.deepEqual(history.changedPaths, state.changedPaths);
+  }
+});
 
 test("run argument validation is fixed and bounded", () => {
   assert.deepEqual(
@@ -355,7 +401,7 @@ test("fixed runner flow verifies child controls, journal evidence, and exact out
     assert.equal(options.env.ULTRACODE_WORKSPACE_ROOT, resolvedWorkspace);
     assert.equal(options.env.ULTRACODE_ALLOWED_OUTPUT, path.join(resolvedWorkspace, "artifacts", "result.md"));
     assert.equal(options.env.CODEX_REAL_BIN, "/usr/bin/true");
-    assert.match(options.env.PATH, /workflow-studio\/scripts/);
+    assert.equal(options.env.PATH.split(path.delimiter)[0], path.dirname(WORKER_RUNNER_PATH));
     await writeFile(path.join(workspace, "artifacts", "result.md"), "# Accepted\n");
 
     const structured = (findings = []) => ({

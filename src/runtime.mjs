@@ -16,6 +16,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
+import { resolveCodexBinary, resolveUltracodeCli } from "./runtime-dependencies.mjs";
 import {
   compareWorkspaceSnapshots,
   pathWithinWritePaths,
@@ -37,7 +38,6 @@ export const PLUGIN_ROOT = path.resolve(srcDir, "..");
 export const WORKFLOW_SOURCE_PATH = path.join(PLUGIN_ROOT, "workflows", "build-artifact.js");
 export const WORKSPACE_WORKFLOW_SOURCE_PATH = path.join(PLUGIN_ROOT, "workflows", "change-workspace.js");
 export const WORKER_RUNNER_PATH = path.join(PLUGIN_ROOT, "scripts", "codex-lean");
-export const DEFAULT_CODEX_REAL_BIN = "/Applications/ChatGPT.app/Contents/Resources/codex";
 export const DEFAULT_PHASES = [
   { title: "Frame", detail: "Independent workers turn the brief into complementary build guidance." },
   { title: "Plan", detail: "A planner combines the strongest guidance into explicit acceptance criteria." },
@@ -187,10 +187,6 @@ function codexHomeFor(environment) {
   return path.resolve(environment.CODEX_HOME || path.join(environment.HOME || os.homedir(), ".codex"));
 }
 
-function ultracodeBinaryFor(environment) {
-  return path.join(environment.HOME || os.homedir(), ".local", "bin", "ultracode");
-}
-
 function executeFile(file, args, options) {
   return new Promise((resolve) => {
     execFile(file, args, options, (error, stdout, stderr) => {
@@ -293,7 +289,15 @@ function findingList(record) {
   const host = isPlainObject(record.workflow_studio) && Array.isArray(record.workflow_studio.blocking_findings)
     ? record.workflow_studio.blocking_findings
     : [];
-  return [...new Set([...host, ...review, ...final].filter((item) => typeof item === "string" && item.trim()))];
+  const error = typeof record.error === "string" ? record.error : record.error?.message;
+  const workerFailures = (Array.isArray(record.workers) ? record.workers : []).flatMap((worker) => {
+    const workerError = typeof worker?.error === "string" ? worker.error : worker?.error?.message;
+    const blocking = Array.isArray(worker?.result?.blocking_findings) ? worker.result.blocking_findings : [];
+    return [workerError, ...blocking]
+      .filter((item) => typeof item === "string" && item.trim())
+      .map((item) => `${worker.label || "Worker"}: ${item}`);
+  });
+  return [...new Set([error, ...workerFailures, ...host, ...review, ...final].filter((item) => typeof item === "string" && item.trim()))];
 }
 
 function phaseState(record, phase, index, phases, accepted) {
@@ -677,14 +681,15 @@ async function prepareRuntime(options, workflowPath, workflowId) {
   const environment = { ...process.env, ...(options.environment || {}) };
   const codexHome = options.codexHome || codexHomeFor(environment);
   const workerRunner = options.workerRunner || WORKER_RUNNER_PATH;
-  const ultracodeBin = options.ultracodeBin || ultracodeBinaryFor(environment);
-  const codexRealBin = options.codexRealBin || DEFAULT_CODEX_REAL_BIN;
+  const ultracodeBin = options.ultracodeBin || process.execPath;
+  const ultracodeArgs = options.ultracodeBin ? [] : [await resolveUltracodeCli(codexHome)];
+  const codexRealBin = options.codexRealBin || await resolveCodexBinary(environment);
   await access(workflowPath, fsConstants.R_OK);
   await access(workerRunner, fsConstants.R_OK | fsConstants.X_OK);
   await access(ultracodeBin, fsConstants.R_OK | fsConstants.X_OK);
   await access(codexRealBin, fsConstants.R_OK | fsConstants.X_OK);
   return {
-    environment, codexHome, workerRunner, ultracodeBin, codexRealBin, workflowId, workflowPath,
+    environment, codexHome, workerRunner, ultracodeBin, ultracodeArgs, codexRealBin, workflowId, workflowPath,
     workflowHash: await sha256File(workflowPath),
     executor: options.executeFile || executeFile,
   };
@@ -717,6 +722,7 @@ async function executeWorkflowProcess(runtime, { workspace, workflowArguments, e
     child = await runtime.executor(
       runtime.ultracodeBin,
       [
+        ...runtime.ultracodeArgs,
         `@${runtime.workflowPath}`, "--cwd", workspace, "--codex-home", runtime.codexHome,
         "--args", JSON.stringify(workflowArguments), "--concurrency", "2", "--max-agents", String(maxAgents),
         "--max-retries", "1", "--no-auto-update", "--no-ui",
@@ -903,6 +909,10 @@ export async function runWorkspaceWorkflow(rawArguments, options = {}) {
   }
   if (launched && executed.child.exitCode !== 0) {
     blocking.push(workflowProcessError(executed.child));
+  }
+  if (launched && (launched.journal.status !== "completed" || launched.journal.result?.accepted !== true)) {
+    const failures = findingList(launched.journal);
+    blocking.push(...(failures.length ? failures : ["The workspace workflow did not return an accepted final result."]));
   }
   if (after && before.head !== after.head) blocking.push("The workflow changed Git HEAD, which is not permitted.");
   const outsideScopes = changedFiles.filter((file) => !pathWithinWritePaths(file.path, request.write_paths));

@@ -129,6 +129,24 @@ const VERIFIER_SCHEMA = {
   },
 };
 
+function scopedReportSchema(schema, pathKey, writePaths) {
+  const scopes = writePaths.map((scope) => scope.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+  return {
+    ...schema,
+    properties: {
+      ...schema.properties,
+      [pathKey]: {
+        ...schema.properties[pathKey],
+        description: "Normalized repository-relative paths inside authorized write_paths. Never absolute paths, URLs, traversal, .git, backslashes, or prose.",
+        items: {
+          ...schema.properties[pathKey].items,
+          pattern: `^(?:${scopes})(?:/(?!(?:\\.{1,2}|\\.git)(?:/|$))[^/\\\\\\u0000]+)*$`,
+        },
+      },
+    },
+  };
+}
+
 function isPlainObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -315,9 +333,13 @@ const baselineStatusText = request.baseline_status.length
 const repositoryRules =
   "Load and follow the nearest applicable repository AGENTS.md or equivalent project instructions. " +
   "Those instructions govern the implementation; do not bypass them or invent replacements.";
+const pathReportRules =
+  "In JSON reports, planned_paths, changed_paths and verified_paths MUST use normalized repository-relative paths " +
+  "exactly like the authorized write_paths (for example src/feature.js). Never prefix the workspace directory, " +
+  "use absolute paths, add ./, use backslashes, include .git or traversal, or put explanations in path strings.";
 const externalBoundary =
   "This is a local-only change. Do not browse the web or use network access, send messages, publish, deploy, " +
-  "commit, push, or mutate any external system. Keep every write inside the authorized write_paths.";
+  "commit, push, or mutate any external system. Keep every write inside the authorized write_paths. " + pathReportRules;
 
 phase("Discover");
 log(`discovering a bounded workspace change with ${request.scouts} independent scouts`, {
@@ -396,7 +418,7 @@ const planner = await agent(
     reasoning_effort: "medium",
     sandbox: "read-only",
     codex_bin: codexBin,
-    schema: PLANNER_SCHEMA,
+    schema: scopedReportSchema(PLANNER_SCHEMA, "planned_paths", request.write_paths),
   },
 );
 const plan = validatePlanner(planner, request.write_paths);
@@ -419,7 +441,7 @@ const implementation = await agent(
     reasoning_effort: "medium",
     sandbox: "workspace-write",
     codex_bin: codexBin,
-    schema: IMPLEMENTATION_SCHEMA,
+    schema: scopedReportSchema(IMPLEMENTATION_SCHEMA, "changed_paths", request.write_paths),
   },
 );
 const implementationReport = validateReport(implementation, "implementer", request.write_paths, "changed_paths", {
@@ -427,7 +449,7 @@ const implementationReport = validateReport(implementation, "implementer", reque
   findingKey: "blocking_findings",
 });
 if (implementationReport.blocking_findings.length > 0 || implementationReport.verification.length === 0) {
-  throw new Error("The implementation worker returned blocking findings or incomplete verification evidence.");
+  throw new Error(`Implementation blocked: ${implementationReport.blocking_findings.join(" | ") || "missing verification evidence"}`);
 }
 
 phase("Review");
@@ -506,7 +528,7 @@ if (reviewFindings.length > 0) {
       reasoning_effort: "medium",
       sandbox: "workspace-write",
       codex_bin: codexBin,
-      schema: REPAIR_SCHEMA,
+      schema: scopedReportSchema(REPAIR_SCHEMA, "changed_paths", request.write_paths),
     },
   );
   repairReport = validateReport(repair, "repairer", request.write_paths, "changed_paths", {
@@ -514,7 +536,7 @@ if (reviewFindings.length > 0) {
     findingKey: "blocking_findings",
   });
   if (repairReport.blocking_findings.length > 0 || repairReport.verification.length === 0) {
-    throw new Error("The repair worker returned blocking findings or incomplete verification evidence.");
+    throw new Error(`Repair blocked: ${repairReport.blocking_findings.join(" | ") || "missing verification evidence"}`);
   }
 }
 
@@ -540,7 +562,7 @@ const verification = await agent(
     reasoning_effort: "low",
     sandbox: "read-only",
     codex_bin: codexBin,
-    schema: VERIFIER_SCHEMA,
+    schema: scopedReportSchema(VERIFIER_SCHEMA, "verified_paths", request.write_paths),
   },
 );
 const finalVerification = validateReport(verification, "final-verifier", request.write_paths, "verified_paths", {
