@@ -7,6 +7,9 @@ import { promisify } from "node:util";
 
 const execFileP = promisify(execFile);
 const MAX_SNAPSHOT_FILES = 20_000;
+const MAX_IGNORED_ENTRIES = 100_000;
+const MAX_IGNORED_TREE_NODES = 1_000_000;
+const HASH_CONCURRENCY = 16;
 const WORKSPACE_ALLOWED_KEYS = new Set([
   "task",
   "workspace",
@@ -182,13 +185,81 @@ async function hashRegularFile(filePath) {
   const hash = crypto.createHash("sha256");
   for await (const chunk of createReadStream(filePath)) hash.update(chunk);
   const after = await lstat(filePath);
-  if (before.size !== after.size || before.mtimeMs !== after.mtimeMs) {
+  if (
+    before.dev !== after.dev ||
+    before.ino !== after.ino ||
+    before.size !== after.size ||
+    before.mtimeMs !== after.mtimeMs ||
+    before.ctimeMs !== after.ctimeMs
+  ) {
     throw new Error(`File changed while Workflow Studio was snapshotting it: ${filePath}`);
   }
   return hash.digest("hex");
 }
 
-async function snapshotEntry(workspace, relativePath, { strict }) {
+function createHashScheduler() {
+  const pending = new Map();
+  const queue = [];
+  let active = 0;
+
+  const pump = () => {
+    while (active < HASH_CONCURRENCY && queue.length) {
+      const item = queue.shift();
+      active += 1;
+      Promise.resolve()
+        .then(() => hashRegularFile(item.filePath))
+        .then(
+          (value) => {
+            item.resolve(value);
+            active -= 1;
+            pump();
+          },
+          (error) => {
+            item.reject(error);
+            active -= 1;
+            pump();
+          },
+        );
+    }
+  };
+
+  return (filePath) => {
+    const existing = pending.get(filePath);
+    if (existing) return existing;
+    const promise = new Promise((resolve, reject) => {
+      queue.push({ filePath, resolve, reject });
+    });
+    pending.set(filePath, promise);
+    pump();
+    return promise;
+  };
+}
+
+async function mapLimit(values, worker) {
+  const results = new Array(values.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(HASH_CONCURRENCY, values.length) }, async () => {
+    while (true) {
+      const index = next;
+      next += 1;
+      if (index >= values.length) return;
+      results[index] = await worker(values[index], index);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
+function createSnapshotContext() {
+  return {
+    hashFile: createHashScheduler(),
+    ignoredEntries: 0,
+    ignoredTreeNodes: 0,
+    visibleEntries: 0,
+  };
+}
+
+async function snapshotEntry(workspace, relativePath, { strict, context }) {
   const absolutePath = path.join(workspace, ...relativePath.split("/"));
   const stats = await maybeLstat(absolutePath);
   if (!stats) return null;
@@ -205,67 +276,215 @@ async function snapshotEntry(workspace, relativePath, { strict }) {
   if (stats.isDirectory()) return null;
   if (!stats.isFile()) {
     if (strict) throw new Error(`Authorized write scope contains a non-regular file: ${relativePath}`);
-    return null;
+    return {
+      path: relativePath,
+      type: "other",
+      hash: crypto.createHash("sha256").update(`${stats.mode}:${stats.size}`).digest("hex"),
+      mode: stats.mode & 0o777,
+      size: stats.size,
+    };
   }
   if (strict && stats.nlink !== 1) throw new Error(`Authorized write scope contains a hard-linked file: ${relativePath}`);
   return {
     path: relativePath,
     type: "file",
-    hash: await hashRegularFile(absolutePath),
+    hash: await context.hashFile(absolutePath),
     mode: stats.mode & 0o777,
     size: stats.size,
   };
 }
 
-function addEntry(entries, entry) {
+function addEntry(entries, entry, context, { ignored = false } = {}) {
   if (!entry) return;
-  entries.set(entry.path, entry);
-  if (entries.size > MAX_SNAPSHOT_FILES) {
-    throw new Error(`Workspace snapshot exceeds the ${MAX_SNAPSHOT_FILES}-file safety limit.`);
+  if (entries.has(entry.path)) return;
+  if (ignored) {
+    context.ignoredEntries += 1;
+    if (context.ignoredEntries > MAX_IGNORED_ENTRIES) {
+      throw new Error(`Ignored workspace inventory exceeds the ${MAX_IGNORED_ENTRIES}-entry safety limit.`);
+    }
+  } else {
+    context.visibleEntries += 1;
+    if (context.visibleEntries > MAX_SNAPSHOT_FILES) {
+      throw new Error(`Workspace snapshot exceeds the ${MAX_SNAPSHOT_FILES}-file safety limit.`);
+    }
   }
+  entries.set(entry.path, entry);
 }
 
-async function walkScope(workspace, relativePath, entries) {
+function isWriteScope(relativePath, writePaths) {
+  return writePaths.some((scope) => scope === relativePath);
+}
+
+function sortedDirectoryEntries(directoryEntries) {
+  return directoryEntries.sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0);
+}
+
+async function walkScope(workspace, relativePath, entries, context) {
   const absolutePath = path.join(workspace, ...relativePath.split("/"));
   const stats = await maybeLstat(absolutePath);
   if (!stats) return;
   if (stats.isSymbolicLink()) throw new Error(`Authorized write scope contains a symbolic link: ${relativePath}`);
   if (stats.isFile()) {
-    addEntry(entries, await snapshotEntry(workspace, relativePath, { strict: true }));
+    addEntry(entries, await snapshotEntry(workspace, relativePath, { strict: true, context }), context);
     return;
   }
   if (!stats.isDirectory()) throw new Error(`Authorized write scope contains a non-regular path: ${relativePath}`);
-  for (const entry of await readdir(absolutePath, { withFileTypes: true })) {
+  const children = sortedDirectoryEntries(await readdir(absolutePath, { withFileTypes: true }));
+  await mapLimit(children, async (entry) => {
     const child = `${relativePath}/${entry.name}`;
     if (entry.name === ".git") throw new Error(`Authorized write scope contains nested .git metadata: ${child}`);
-    await walkScope(workspace, child, entries);
-  }
+    await walkScope(workspace, child, entries, context);
+  });
 }
 
 function parseNullList(value) {
   return value.split("\0").filter(Boolean);
 }
 
+function parseIgnoredStatus(value) {
+  const paths = [];
+  for (const record of parseNullList(value)) {
+    if (!record.startsWith("!! ")) continue;
+    const relativePath = record.slice(3).replace(/\/$/, "");
+    if (relativePath) paths.push(relativePath);
+  }
+  return paths;
+}
+
+function collapsePaths(paths) {
+  const ordered = [...new Set(paths)].sort();
+  const kept = [];
+  for (const candidate of ordered) {
+    if (kept.some((parent) => candidate === parent || candidate.startsWith(`${parent}/`))) continue;
+    kept.push(candidate);
+  }
+  return kept;
+}
+
+function hashIgnoredDirectory(stats, children) {
+  const hash = crypto.createHash("sha256");
+  hash.update("workflow-studio-ignored-directory\0");
+  hash.update(`${stats.mode & 0o777}\0`);
+  for (const child of children) {
+    hash.update(`${child.name}\0`);
+    if (child.kind === "scope") {
+      hash.update("scope\0");
+      continue;
+    }
+    hash.update(`${child.type}\0${child.mode}\0${child.size}\0${child.hash}\0`);
+  }
+  return hash.digest("hex");
+}
+
+async function snapshotIgnoredNode(workspace, relativePath, writePaths, context) {
+  if (isWriteScope(relativePath, writePaths)) return { kind: "scope" };
+  context.ignoredTreeNodes += 1;
+  if (context.ignoredTreeNodes > MAX_IGNORED_TREE_NODES) {
+    throw new Error(`Ignored workspace inventory exceeds the ${MAX_IGNORED_TREE_NODES}-node safety limit.`);
+  }
+
+  const absolutePath = path.join(workspace, ...relativePath.split("/"));
+  const stats = await maybeLstat(absolutePath);
+  if (!stats) return null;
+  if (stats.isSymbolicLink()) {
+    const target = await readlink(absolutePath);
+    return {
+      kind: "entry",
+      type: "symlink",
+      hash: crypto.createHash("sha256").update(target).digest("hex"),
+      mode: stats.mode & 0o777,
+      size: stats.size,
+    };
+  }
+  if (stats.isFile()) {
+    return {
+      kind: "entry",
+      type: "file",
+      hash: await context.hashFile(absolutePath),
+      mode: stats.mode & 0o777,
+      size: stats.size,
+    };
+  }
+  if (!stats.isDirectory()) {
+    return {
+      kind: "entry",
+      type: "other",
+      hash: crypto.createHash("sha256").update(`${stats.mode}:${stats.size}`).digest("hex"),
+      mode: stats.mode & 0o777,
+      size: stats.size,
+    };
+  }
+
+  const directoryEntries = sortedDirectoryEntries(await readdir(absolutePath, { withFileTypes: true }));
+  const existingNames = new Set(directoryEntries.map((entry) => entry.name));
+  const missingScopeChildren = new Set(
+    writePaths
+      .filter((scope) => scope.startsWith(`${relativePath}/`))
+      .map((scope) => scope.slice(relativePath.length + 1).split("/", 1)[0])
+      .filter((name) => !existingNames.has(name)),
+  );
+  const children = await mapLimit(directoryEntries, async (entry) => {
+    const childPath = `${relativePath}/${entry.name}`;
+    const child = await snapshotIgnoredNode(workspace, childPath, writePaths, context);
+    if (!child) return { name: entry.name, kind: "missing" };
+    return { name: entry.name, ...child };
+  });
+  for (const name of missingScopeChildren) children.push({ name, kind: "scope" });
+  children.sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0);
+  return {
+    kind: "entry",
+    type: "ignored-tree",
+    hash: hashIgnoredDirectory(stats, children),
+    mode: stats.mode & 0o777,
+    size: 0,
+  };
+}
+
+async function snapshotIgnoredEntry(workspace, relativePath, writePaths, context) {
+  const absolutePath = path.join(workspace, ...relativePath.split("/"));
+  const stats = await maybeLstat(absolutePath);
+  if (!stats) return null;
+  if (stats.isDirectory()) {
+    if (pathWithinWritePaths(relativePath, writePaths)) return null;
+    const tree = await snapshotIgnoredNode(workspace, relativePath, writePaths, context);
+    if (!tree || tree.kind === "scope") return null;
+    return { path: relativePath, type: tree.type, hash: tree.hash, mode: tree.mode, size: tree.size };
+  }
+  return snapshotEntry(workspace, relativePath, {
+    strict: pathWithinWritePaths(relativePath, writePaths),
+    context,
+  });
+}
+
 export async function snapshotWorkspace(guard) {
   const head = (await git(guard.workspace, ["rev-parse", "--verify", "HEAD"])).trim();
-  const status = parseNullList(await git(guard.workspace, ["status", "--porcelain=v1", "-z", "--untracked-files=all"]));
+  const status = parseNullList(await git(guard.workspace, ["status", "--porcelain=v1", "-z", "--untracked-files=all"])).sort();
   const visible = parseNullList(await git(guard.workspace, ["ls-files", "-co", "--exclude-standard", "-z"]));
-  const ignored = parseNullList(await git(guard.workspace, [
-    "ls-files",
-    "--others",
-    "--ignored",
-    "--exclude-standard",
+  const ignored = parseIgnoredStatus(await git(guard.workspace, [
+    "status",
+    "--porcelain=v1",
     "-z",
+    "--ignored=matching",
   ]));
-  const candidates = [...new Set([...visible, ...ignored])].sort();
+  const candidates = [...new Set(visible)].sort();
+  const ignoredRoots = collapsePaths(ignored);
+  const context = createSnapshotContext();
   const entries = new Map();
-  for (const relativePath of candidates) {
-    addEntry(entries, await snapshotEntry(guard.workspace, relativePath, {
+  const visibleEntries = await mapLimit(candidates, (relativePath) => snapshotEntry(guard.workspace, relativePath, {
       strict: pathWithinWritePaths(relativePath, guard.writePaths),
+      context,
     }));
-  }
-  for (const writePath of guard.writePaths) await walkScope(guard.workspace, writePath, entries);
-  return { head, status, entries };
+  for (const entry of visibleEntries) addEntry(entries, entry, context);
+  const ignoredEntries = await mapLimit(ignoredRoots, (relativePath) =>
+    snapshotIgnoredEntry(guard.workspace, relativePath, guard.writePaths, context),
+  );
+  for (const entry of ignoredEntries) addEntry(entries, entry, context, { ignored: true });
+  for (const writePath of guard.writePaths) await walkScope(guard.workspace, writePath, entries, context);
+  return {
+    head,
+    status,
+    entries: new Map([...entries.entries()].sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)),
+  };
 }
 
 function changedStatus(before, after) {
