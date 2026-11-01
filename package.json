@@ -24,7 +24,7 @@
     "check": "npm test && npm run smoke:mcp && npm run validate:release"
   },
   "dependencies": {
-    "@modelcontextprotocol/ext-apps": "^1.7.0"
+    "@modelcontextprotocol/ext-apps": "^2.0.4"
   },
   "devDependencies": {
     "esbuild": "^0.25.9"
